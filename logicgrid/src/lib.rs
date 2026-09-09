@@ -8,6 +8,7 @@ mod clue;
 mod generate;
 mod model;
 mod solver;
+mod themes;
 
 pub use clue::Clue;
 pub use generate::generate;
