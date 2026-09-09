@@ -1,0 +1,193 @@
+# corps plan: logic-grid-term v0.1
+# Run: corps plan run plans/v0.1.toml
+# DAG: core -> { generator, tui } (generator and tui run in parallel)
+
+[[task]]
+name = "core"
+task = """
+# Goal
+Implement the `logicgrid` puzzle model and solver (REQUIREMENTS.md A1, A2, A4.2, A4.3, C1),
+plus a PLACEHOLDER `generate` function so downstream agents can build in parallel.
+Read REQUIREMENTS.md fully before starting.
+
+# Owns
+- logicgrid/src/lib.rs, logicgrid/src/model.rs, logicgrid/src/clue.rs, logicgrid/src/solver.rs
+- logicgrid/src/generate.rs (placeholder only, see below)
+- logicgrid/Cargo.toml (add serde_json; keep C1: no ratatui/crossterm/clap)
+- logicgrid/tests/
+
+# Don't touch
+- logictui/**, Cargo.toml (workspace root), REQUIREMENTS.md, plans/, corps.toml
+
+# Public API contract (downstream agents code against exactly this; keep names)
+```rust
+pub struct Category { pub name: String, pub items: Vec<String> }
+/// Index into Puzzle::categories.
+pub type Cat = usize;
+/// Index into Category::items.
+pub type Item = usize;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub struct Entity { pub cat: Cat, pub item: Item }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Clue {
+    Is(Entity, Entity),
+    IsNot(Entity, Entity),
+    /// a is paired with exactly one of b, c.
+    Either(Entity, Entity, Entity),
+    /// In ordered category `ord`, a's value is strictly less than b's.
+    Before(Entity, Entity, Cat),
+    After(Entity, Entity, Cat),
+    /// In ordered category `ord`, a and b differ by exactly one position.
+    Adjacent(Entity, Entity, Cat),
+    NotSame(Entity, Entity),
+}
+impl Clue { pub fn text(&self, p: &Puzzle) -> String; }
+
+/// solution[cat][anchor_item] = item index in `cat`. solution[0][i] == i.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Solution(pub Vec<Vec<Item>>);
+impl Solution { pub fn pairs(&self, a: Entity, b: Entity) -> bool; }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Puzzle {
+    pub categories: Vec<Category>,   // categories[0] is the anchor
+    pub ordered: Vec<bool>,          // ordered[c] == true if category c is numeric/ordinal
+    pub clues: Vec<Clue>,
+    pub solution: Solution,
+    pub seed: u64,
+}
+impl Puzzle {
+    pub fn n_cats(&self) -> usize; pub fn n_items(&self) -> usize;
+    pub fn to_json(&self) -> String;
+    pub fn from_json(s: &str) -> Result<Puzzle, serde_json::Error>;
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
+pub enum Mark { #[default] Unknown, No, Yes }
+/// Player grid: mark(a, b) for entities in different categories, symmetric.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Grid { /* private */ }
+impl Grid {
+    pub fn new(p: &Puzzle) -> Grid;
+    pub fn get(&self, a: Entity, b: Entity) -> Mark;
+    pub fn set(&mut self, a: Entity, b: Entity, m: Mark);
+    /// Entities whose current mark contradicts p.solution (A2.3).
+    pub fn contradictions(&self, p: &Puzzle) -> Vec<(Entity, Entity)>;
+    pub fn is_solved(&self, p: &Puzzle) -> bool;
+}
+
+pub enum SolveResult { Unique(Solution), Multiple, None }
+pub fn solve(categories: &[Category], ordered: &[bool], clues: &[Clue]) -> SolveResult;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Difficulty { Easy, Medium, Hard }
+impl std::str::FromStr for Difficulty { /* "easy"|"medium"|"hard" */ }
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Size { pub cats: usize, pub items: usize }
+impl std::str::FromStr for Size { /* "4x4" -> cats=4, items=4 */ }
+pub fn generate(size: Size, difficulty: Difficulty, seed: u64) -> Puzzle;
+```
+
+# Placeholder generate (A3 is NOT yours)
+`generate.rs` must contain ONLY a hand-written 3-category x 3-item puzzle (any theme) with a
+clue set the solver confirms unique, returned for every input. Mark the file with a
+`// PLACEHOLDER: replaced by the generator task` comment. The generator agent owns rewriting it.
+
+# Solver requirements
+- Constraint propagation over a per-category-pair possibility matrix, with backtracking
+  search to prove uniqueness (count solutions, stop at 2). Must be complete on 3x3..5x5
+  and return in well under 1s (A2.2). Add a test that times a 5x5 with few clues.
+- Transitivity: if a=b and b=c then a=c; propagate across all category pairs.
+- Ordinal clues use item index order within the ordered category.
+
+# Done when
+- All A1 and A2 MUST items have unit tests in logicgrid/tests/ or #[cfg(test)].
+- Hand-written 4x4 puzzle with known solution solves to Unique; removing one clue gives Multiple;
+  adding a contradictory clue gives None.
+- Every pub item has a /// doc comment (A4.3).
+- `cargo fmt --all` clean, `cargo test --workspace` green, `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- Committed on your branch. Do not touch main.
+"""
+
+[[task]]
+name = "generator"
+depends_on = ["core"]
+task = """
+# Goal
+Replace the placeholder `logicgrid/src/generate.rs` with a real generator (REQUIREMENTS.md A1.5, A3, A4.1).
+Read REQUIREMENTS.md fully. Consume the committed `core` API exactly; do not rename its types.
+
+# Owns
+- logicgrid/src/generate.rs (rewrite wholesale), logicgrid/src/themes.rs (new; add `mod themes;` in lib.rs is
+  the ONE line you may touch in lib.rs)
+- logicgrid/tests/generate.rs (new)
+- logicgrid/Cargo.toml only to adjust the `rand` dependency if needed
+
+# Don't touch
+- logicgrid/src/{model,clue,solver}.rs. If the solver has a bug that blocks you, write a failing test
+  in logicgrid/tests/ documenting it, work around it, and note it in your final commit message.
+- logictui/**, plans/, corps.toml, REQUIREMENTS.md
+
+# Approach
+1. Theme bank (A1.5): at least 6 themes, each with 5 categories of 5 named items, at least one
+   ordered category (times, prices, ages, house numbers) per theme, plain `const` data.
+2. From `seed`, build a `rand::rngs::StdRng`, pick a theme, take `size.cats` categories and
+   `size.items` items each, shuffle a random Solution.
+3. Enumerate every true clue of the difficulty's allowed types from the solution.
+   Easy: Is, IsNot. Medium: + NotSame, Either. Hard: + Before, After, Adjacent, and no `Is`
+   clue between the anchor category and another (A3.7).
+4. Shuffle candidates, add clues until `solve` returns Unique, then remove clues one at a time
+   (keeping only those whose removal breaks uniqueness) until minimal (A3.3).
+5. Shuffle the final clue order.
+
+# Done when
+- Property test: for every size in {3x3,3x4,4x4,4x5,5x5} x every difficulty x 7 seeds (105 puzzles),
+  `solve` returns Unique equal to puzzle.solution, and removing any single clue returns Multiple.
+- Determinism test: same inputs twice gives identical `to_json` output (A3.2).
+- Timing test: 5x5 Hard generates in < 2s in release (A3.6); document debug timing in a comment.
+- Hard puzzles contain at least one ordinal clue; Easy contain only Is/IsNot (A3.4).
+- `cargo fmt --all` clean, `cargo test --workspace` green, `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- Committed on your branch. Do not touch main.
+"""
+
+[[task]]
+name = "tui"
+depends_on = ["core"]
+task = """
+# Goal
+Build the `logictui` ratatui player (REQUIREMENTS.md section B, all MUST items; SHOULD items only
+if cheap after MUSTs are done). Read REQUIREMENTS.md fully. Consume the committed `core` crate API
+exactly. Note `logicgrid::generate` is currently a placeholder returning one fixed 3x3 puzzle for
+any input; build against the signature, not the output. A sibling agent is replacing it in parallel.
+For testing larger layouts, hand-write a 4x4 and 5x5 fixture Puzzle in logictui/src/fixtures.rs
+(behind #[cfg(test)] or a `--fixture` dev flag) and verify with `logicgrid::solve` that they are Unique.
+
+# Owns
+- logictui/** (all files)
+- README.md (new, B4.3)
+
+# Don't touch
+- logicgrid/** (if you need an API change, stub it locally in logictui and document it in your
+  final commit message; do not edit the library)
+- plans/, corps.toml, REQUIREMENTS.md, workspace Cargo.toml
+
+# Structure (mirror ../projects/crossword/crosstui: app.rs, screens/, storage.rs, theme.rs)
+- main.rs: clap args `[FILE]`, `--size`, `--difficulty`, `--seed`, `--save PATH`. Terminal init with
+  panic hook that restores the terminal (B4.1).
+- screens/home.rs: pick size and difficulty (B1.1), SHOULD: recent puzzles list (B3.3).
+- screens/play.rs: triangular grid of sub-grids + clue panel (B2.1). Keys per B2.2-B2.5:
+  arrows/hjkl move, Space/Enter cycle, x/o set, Backspace clear, s strike clue, c check,
+  ? help, w save puzzle JSON, q quit. Auto-No on Yes (B2.3). Win banner (B2.6).
+- storage.rs: autosave Grid + struck clues to `dirs::data_dir()/logictui/<seed>-<size>-<difficulty>.json`
+  on every change; restore on open (B3.1).
+
+# Done when
+- All B MUST items work when run with `cargo run -p logictui -- --size 3x3 --difficulty easy`
+  and with the fixture 5x5 fitting a 120x40 terminal, 4x4 fitting 80x24.
+- Unit tests for: auto-No propagation, win detection against a fixture, storage round-trip,
+  Size/Difficulty arg parsing.
+- README.md covers install, controls, CLI flags.
+- `cargo fmt --all` clean, `cargo test --workspace` green, `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- Committed on your branch. Do not touch main.
+"""
