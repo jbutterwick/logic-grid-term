@@ -1,5 +1,6 @@
 //! Play screen: triangular grid + clue panel (B2).
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use logicgrid::{Cat, Entity, Grid, Mark, Puzzle};
@@ -28,7 +29,9 @@ pub struct PlayScreen {
     cursor: (usize, usize),
     clue_sel: usize,
     bad: Vec<(Entity, Entity)>,
-    undo: Vec<Grid>,
+    undo: Vec<(Grid, Auto)>,
+    /// Cells auto-marked No by a Yes, keyed by the Yes cell that placed them.
+    auto: Auto,
     help: bool,
     solved: bool,
     status: String,
@@ -49,29 +52,46 @@ fn block_exists(n: usize, bi: usize, bj: usize) -> bool {
     bi + bj < n - 1
 }
 
-/// Sets a mark, auto-marking the rest of the sub-grid row/column as No on Yes (B2.3).
-pub fn apply(grid: &mut Grid, p: &Puzzle, a: Entity, b: Entity, m: Mark) {
+/// Auto-placed No cells, keyed by the Yes cell that caused them.
+pub type Auto = HashSet<(Entity, Entity, Entity, Entity)>;
+
+/// Sets a mark. A Yes auto-marks the rest of its sub-grid row/column as No; leaving a Yes
+/// reverts only the Nos that Yes placed, so mistaken Yes marks are cheap to undo (B2.3).
+pub fn apply(grid: &mut Grid, auto: &mut Auto, p: &Puzzle, a: Entity, b: Entity, m: Mark) {
+    if grid.get(a, b) == Mark::Yes && m != Mark::Yes {
+        auto.retain(|&(ya, yb, x, y)| {
+            let mine = (ya, yb) == (a, b);
+            if mine && grid.get(x, y) == Mark::No {
+                grid.set(x, y, Mark::Unknown);
+            }
+            !mine
+        });
+    }
     grid.set(a, b, m);
     if m == Mark::Yes {
+        let mut mark = |x: Entity, y: Entity| {
+            if grid.get(x, y) == Mark::Unknown {
+                grid.set(x, y, Mark::No);
+                auto.insert((a, b, x, y));
+            }
+        };
         for i in 0..p.n_items() {
             if i != a.item {
-                grid.set(
+                mark(
                     Entity {
                         cat: a.cat,
                         item: i,
                     },
                     b,
-                    Mark::No,
                 );
             }
             if i != b.item {
-                grid.set(
+                mark(
                     a,
                     Entity {
                         cat: b.cat,
                         item: i,
                     },
-                    Mark::No,
                 );
             }
         }
@@ -99,6 +119,8 @@ impl PlayScreen {
             clue_sel: 0,
             bad: vec![],
             undo: vec![],
+            // ponytail: not persisted; after a restore, un-Yes keeps its auto-Nos.
+            auto: Auto::new(),
             help: false,
             status: String::new(),
         }
@@ -145,8 +167,8 @@ impl PlayScreen {
 
     fn set_mark(&mut self, m: Mark) {
         let (a, b) = self.entities(self.cursor);
-        self.undo.push(self.grid.clone());
-        apply(&mut self.grid, &self.puzzle, a, b, m);
+        self.undo.push((self.grid.clone(), self.auto.clone()));
+        apply(&mut self.grid, &mut self.auto, &self.puzzle, a, b, m);
         self.after_change();
     }
 
@@ -203,8 +225,9 @@ impl PlayScreen {
             KeyCode::Char('o') => self.set_mark(Mark::Yes),
             KeyCode::Backspace | KeyCode::Delete => self.set_mark(Mark::Unknown),
             KeyCode::Char('u') => {
-                if let Some(g) = self.undo.pop() {
+                if let Some((g, auto)) = self.undo.pop() {
                     self.grid = g;
+                    self.auto = auto;
                     self.after_change();
                 }
             }
@@ -504,7 +527,10 @@ mod tests {
     fn yes_auto_marks_row_and_column_no() {
         let p = fixtures::four();
         let mut g = Grid::new(&p);
-        apply(&mut g, &p, e(0, 1), e(2, 3), Mark::Yes);
+        let mut auto = Auto::new();
+        // A player-placed No must survive the Yes/un-Yes round trip.
+        g.set(e(0, 2), e(2, 3), Mark::No);
+        apply(&mut g, &mut auto, &p, e(0, 1), e(2, 3), Mark::Yes);
         assert_eq!(g.get(e(0, 1), e(2, 3)), Mark::Yes);
         for i in 0..4 {
             if i != 1 {
@@ -516,9 +542,12 @@ mod tests {
         }
         // Other sub-grids untouched.
         assert_eq!(g.get(e(0, 1), e(1, 0)), Mark::Unknown);
-        // Removing the Yes keeps the auto-Nos (B2.3).
-        apply(&mut g, &p, e(0, 1), e(2, 3), Mark::Unknown);
-        assert_eq!(g.get(e(0, 0), e(2, 3)), Mark::No);
+        // Removing the Yes reverts its auto-Nos but keeps the player's No (B2.3).
+        apply(&mut g, &mut auto, &p, e(0, 1), e(2, 3), Mark::Unknown);
+        assert_eq!(g.get(e(0, 0), e(2, 3)), Mark::Unknown);
+        assert_eq!(g.get(e(0, 1), e(2, 0)), Mark::Unknown);
+        assert_eq!(g.get(e(0, 2), e(2, 3)), Mark::No);
+        assert!(auto.is_empty());
     }
 
     #[test]
@@ -528,7 +557,14 @@ mod tests {
         assert!(!g.is_solved(&p));
         for c in 1..p.n_cats() {
             for i in 0..p.n_items() {
-                apply(&mut g, &p, e(0, i), e(c, p.solution.0[c][i]), Mark::Yes);
+                apply(
+                    &mut g,
+                    &mut Auto::new(),
+                    &p,
+                    e(0, i),
+                    e(c, p.solution.0[c][i]),
+                    Mark::Yes,
+                );
             }
         }
         assert!(g.is_solved(&p));

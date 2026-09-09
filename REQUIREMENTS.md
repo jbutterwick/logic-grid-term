@@ -47,7 +47,7 @@ Numbered so plans, briefs, and tests can cite them. MUST = required for v0.1. SH
 ### B2. Play screen
 - B2.1 MUST: Renders the full triangular logic grid (every category pair as a sub-grid) plus the clue list in a side panel, fitting an 80×24 terminal for 4×4 and scaling up for 5×5.
 - B2.2 MUST: Cursor moves with arrows and `hjkl`; a cell cycles Unknown → No → Yes with Space/Enter, or set directly with `x` (No) and `o` (Yes). Backspace clears.
-- B2.3 MUST: Placing Yes auto-marks the rest of that row and column in the sub-grid as No (standard logic grid behavior). Removing the Yes does not un-mark those.
+- B2.3 MUST: Placing Yes auto-marks the rest of that row and column in the sub-grid as No (standard logic grid behavior). Removing the Yes reverts only the Nos it auto-placed; player-placed Nos stay.
 - B2.4 MUST: Clues can be toggled struck-through (`s` or number key) to track which are used.
 - B2.5 MUST: `c` checks the grid and highlights marks that contradict the solution. `?` shows a help overlay.
 - B2.6 MUST: When every anchor item has a Yes in every other category and the grid matches the solution, show a win state (crossword uses confetti; reuse that pattern if trivial, otherwise a banner).
