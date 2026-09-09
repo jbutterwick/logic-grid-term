@@ -1,0 +1,41 @@
+# logic-grid-term is a Rust workspace (logicgrid lib + logictui ratatui binary).
+# Isolated Git worktrees only: no databases, ports, env files, services, or migrations.
+
+[project]
+name            = "logic-grid-term"
+worktrees_dir   = "../logic-grid-term-fleet"
+branch_template = "agent/{name}"
+base_branch     = "main"
+
+[agent]
+default_provider  = "claude"
+manager_provider  = "claude"
+resolver_provider = "claude"
+system_prompt = """
+This is a Cargo workspace: `logicgrid` (puzzle generator/solver library, no UI deps)
+and `logictui` (ratatui player binary depending on logicgrid).
+Keep UI code out of logicgrid. Before committing, run `cargo fmt --all`,
+`cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`.
+Commit only on your own agent branch; never touch main.
+"""
+
+# Verified against `claude --help`: --append-system-prompt <prompt>, positional
+# initial prompt for interactive sessions, --print for one-shot output.
+[agent.providers.claude]
+executable    = "claude"
+args          = ["--dangerously-skip-permissions"]
+status        = "hooks"
+system_prompt = { transport = "argument", flag = "--append-system-prompt" }
+worker        = { initial_task = { transport = "argument" } }
+manager       = { initial_task = { transport = "argument" } }
+resolver      = { args = ["--print"], initial_task = { transport = "argument" }, timeout_secs = 600 }
+
+# Verified against `pi --help`: same --append-system-prompt / positional / --print contract.
+[agent.providers.pi]
+executable    = "pi"
+args          = ["--model", "openai-codex/gpt-5.6-sol"]
+status        = "none"
+system_prompt = { transport = "argument", flag = "--append-system-prompt" }
+worker        = { initial_task = { transport = "argument" } }
+manager       = { initial_task = { transport = "argument" } }
+resolver      = { args = ["--print"], initial_task = { transport = "argument" }, timeout_secs = 600 }

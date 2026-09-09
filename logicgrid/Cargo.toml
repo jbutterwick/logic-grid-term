@@ -1,0 +1,10 @@
+[package]
+name = "logicgrid"
+description = "Logic grid puzzle generator and solver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
