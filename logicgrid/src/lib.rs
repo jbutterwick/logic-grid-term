@@ -1,14 +1,15 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Logic grid puzzle model, solver, and generator (no UI dependencies).
+//!
+//! A puzzle has `N` categories of `M` items each. Category 0 is the anchor;
+//! the [`Solution`] maps every anchor item to one item of every other category.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#![deny(missing_docs)]
+mod clue;
+mod generate;
+mod model;
+mod solver;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use clue::Clue;
+pub use generate::generate;
+pub use model::{Cat, Category, Difficulty, Entity, Grid, Item, Mark, Puzzle, Size, Solution};
+pub use solver::{SolveResult, solve};
