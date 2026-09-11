@@ -1,0 +1,12 @@
+[package]
+name = "casefile"
+description = "An email-inbox detective game of logical deduction, in the terminal or the browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository = "https://github.com/jbutterwick/logic-grid-term"
+
+[dependencies]
+logicgrid = { path = "../logicgrid", version = "0.1.0" }
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
+serde = { version = "1", features = ["derive"] }

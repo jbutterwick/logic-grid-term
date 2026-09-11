@@ -1,4 +1,4 @@
-# logic-grid-term is a Rust workspace (logicgrid lib + logictui ratatui binary).
+# logic-grid-term is a Rust workspace (logicgrid lib + logictui ratatui binary + casefile game).
 # Isolated Git worktrees only: no databases, ports, env files, services, or migrations.
 
 [project]
@@ -12,11 +12,14 @@ default_provider  = "claude"
 manager_provider  = "claude"
 resolver_provider = "claude"
 system_prompt = """
-This is a Cargo workspace: `logicgrid` (puzzle generator/solver library, no UI deps)
-and `logictui` (ratatui player binary depending on logicgrid).
+This is a Cargo workspace: `logicgrid` (puzzle generator/solver library, no UI deps),
+`logictui` (ratatui 0.29 player binary depending on logicgrid), and `casefile`
+(narrative detective game on logicgrid; ratatui 0.30 natively, Ratzilla on wasm32).
 Keep UI code out of logicgrid. Before committing, run `cargo fmt --all`,
 `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`.
 Commit only on your own agent branch; never touch main.
+Never add Co-Authored-By trailers, "Generated with" lines, or any other AI attribution
+to commit messages: the repository owner requires human-only authorship in history.
 """
 
 # Verified against `claude --help`: --append-system-prompt <prompt>, positional

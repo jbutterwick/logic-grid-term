@@ -68,3 +68,21 @@ Numbered so plans, briefs, and tests can cite them. MUST = required for v0.1. SH
 - C1 MUST: `logicgrid` never depends on ratatui, crossterm, or clap.
 - C2 MUST: All work lands via agent branches merged to `main`; `main` always builds and passes A4.2.
 - C3 MUST: Each agent brief cites the requirement IDs it owns and adds tests for them.
+
+## D. `casefile` crate (narrative deduction game)
+
+### D1. Core library (no I/O)
+- D1.1 MUST: `casefile` depends on `logicgrid` only for puzzle generation. It never depends on `logictui`, and its core module never touches the filesystem, clock, or OS randomness, so it compiles for `wasm32-unknown-unknown`.
+- D1.2 MUST: A case is deterministic in `(seed, difficulty, theme, adult)`. Suspects are the anchor category; every other category is a fact about each suspect. One designated guilty fact plus the solution determines the culprit.
+- D1.3 MUST: Every suspect has honesty (truthful or liar), mood, and guilty-conscience traits drawn from the seed. Traits change tone and whether the suspect lies; they never remove true statements.
+- D1.4 MUST: The generator's minimal clue set is distributed across suspects as truthful statements. Liars add false statements on top. The truthful statements alone always solve the case, so the case is always solvable by deduction.
+- D1.5 MUST: Pressing a suspect on a statement repeats a truthful statement verbatim and makes a false one drift. Difficulty controls the number of liars, whether the culprit lies about the guilty fact, and how subtle the drift is.
+- D1.6 MUST: Questions are chosen from a per-suspect menu (own facts, another suspect, a category, press). Replies arrive after the player's next action, not immediately.
+- D1.7 MUST: An accusation names a suspect and the guilty fact. A wrong accusation lowers the final rank and silences the accused; it never ends the case.
+- D1.8 MUST: An adult toggle chosen at setup swaps in profanity, harsher crimes, and innuendo. No sexually explicit content in either mode.
+
+### D2. Frontends
+- D2.1 MUST: A ratatui terminal binary with setup, inbox, thread, compose, notepad (grid plus free notes), accusation, and result screens. Installable with `cargo install casefile`.
+- D2.2 MUST: The same screens build for the web with Ratzilla and `trunk build`, producing a static `dist/` directory.
+- D2.3 SHOULD: Progress bar showing truthful statements collected and grid cells resolved.
+- D2.4 SHOULD: Save and resume (file on native, localStorage on web).
