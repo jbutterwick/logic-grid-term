@@ -9,6 +9,6 @@ license.workspace = true
 clap = { version = "4.5", features = ["derive"] }
 dirs = "6"
 logicgrid = { path = "../logicgrid", version = "0.1.0" }
-ratatui = "0.29"
+ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -91,4 +91,37 @@ fn main() {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn main() {} // web task: Ratzilla entry goes here.
+fn main() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use casefile::ui::{App, Key};
+    use ratzilla::event::KeyCode;
+    use ratzilla::{DomBackend, WebRenderer};
+
+    let app = Rc::new(RefCell::new(App::new(js_sys::Date::now() as u64)));
+    let backend = DomBackend::new().expect("dom backend");
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .on_key_event({
+            let app = app.clone();
+            move |k| {
+                let key = match k.code {
+                    KeyCode::Up => Key::Up,
+                    KeyCode::Down => Key::Down,
+                    KeyCode::Left => Key::Left,
+                    KeyCode::Right => Key::Right,
+                    KeyCode::Enter => Key::Enter,
+                    KeyCode::Esc => Key::Esc,
+                    KeyCode::Backspace => Key::Backspace,
+                    KeyCode::Tab => Key::Tab,
+                    KeyCode::Char(c) => Key::Char(c),
+                    _ => return,
+                };
+                app.borrow_mut().on_key(key);
+            }
+        })
+        .expect("key handler");
+    // ponytail: quit() is ignored on the web; there is no terminal to give back.
+    terminal.draw_web(move |f| app.borrow().render(f.area(), f.buffer_mut()));
+}

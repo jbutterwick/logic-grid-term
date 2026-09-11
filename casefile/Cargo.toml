@@ -16,3 +16,8 @@ ratatui = { version = "0.30", default-features = false }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 clap = { version = "4.5", features = ["derive"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["std"] }
+ratzilla = "0.3"
+js-sys = "0.3"
