@@ -1,0 +1,439 @@
+# corps plan: casefile v1 (REQUIREMENTS.md section D)
+# Run: corps plan run plans/casefile-v1.toml
+# DAG: core -> { tui, content }; tui -> web; { web, content } -> release
+#
+# Shared rules for every task (repeated in each brief because workers only see their own):
+# - Checks: `cargo fmt --all --check`, `cargo test --workspace`,
+#   `cargo clippy --workspace --all-targets -- -D warnings`,
+#   `cargo build -p casefile --lib --target wasm32-unknown-unknown` (core must stay wasm-safe).
+# - Commit all tracked work on your own agent branch with a clean worktree. Never touch main.
+# - NEVER add Co-Authored-By trailers, "Generated with" lines, or any AI attribution to commits.
+# - When finished, run `corps task complete`. If blocked, run `corps task fail` with the reason.
+
+[[task]]
+name = "core"
+task = """
+# Goal
+Build the `casefile` core library: turn a `logicgrid` puzzle into a detective case with
+suspects, personalities, truthful and false statements, an email inbox state machine, and an
+accusation. REQUIREMENTS.md D1.1 through D1.8. Read REQUIREMENTS.md section D and
+logicgrid/src/{model,clue,generate,themes}.rs fully before starting. The crate currently
+holds a placeholder lib.rs and main.rs; replace lib.rs, leave main.rs alone.
+
+# Owns
+- casefile/src/lib.rs, casefile/src/case.rs, casefile/src/text.rs, casefile/src/game.rs
+- casefile/src/content.rs (PLACEHOLDER content; the `content` task rewrites it wholesale)
+- casefile/tests/**
+- casefile/Cargo.toml (deps: logicgrid, rand without default features, serde, serde_json;
+  NO ratatui, crossterm, clap, dirs, or anything touching the OS)
+
+# Don't touch
+- casefile/src/main.rs, casefile/src/ui/**, logicgrid/**, logictui/**, workspace Cargo.toml,
+  REQUIREMENTS.md, README.md, plans/, corps.toml
+
+# Public API contract (the tui, content, and web tasks code against exactly this; keep names)
+```rust
+// lib.rs re-exports everything below plus `pub use logicgrid::{Cat, Clue, Entity, Grid, Item, Mark, Puzzle};`
+// and `pub fn theme_names() -> Vec<&'static str>` (wraps logicgrid::theme_names).
+#![deny(missing_docs)]
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Level { Easy, Medium, Hard }
+impl std::str::FromStr for Level { /* "easy"|"medium"|"hard", case-insensitive */ }
+impl Level {
+    pub fn size(self) -> logicgrid::Size;            // Easy 3x4, Medium 4x4, Hard 5x5
+    pub fn difficulty(self) -> logicgrid::Difficulty; // Easy, Medium, Hard
+    pub fn liars(self) -> usize;                      // 0, 1, 2
+    pub fn culprit_lies(self) -> bool;                // false, false, true
+    pub fn subtle_tells(self) -> bool;                // false, false, true
+    pub fn name(self) -> &'static str;                // "easy" | "medium" | "hard"
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Mood { Cooperative, Nervous, Hostile, Chatty }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Settings { pub seed: u64, pub level: Level, pub theme: Option<usize>, pub adult: bool }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Statement { pub clue: Clue, pub truthful: bool, pub revealed: bool }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Suspect {
+    pub name: String,            // anchor item display name
+    pub email: String,           // "<name lowercased>@<frame.domain>"
+    pub liar: bool,
+    pub mood: Mood,
+    pub conscience: bool,        // feels guilty: hedges in replies
+    pub statements: Vec<Statement>,
+    pub silenced: bool,          // stops replying after being wrongly accused
+}
+
+/// Theme framing resolved for this case (from content.rs; adult variants already applied).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Frame {
+    pub title: String,           // puzzle.title, e.g. "Manor Mystery"
+    pub domain: String,          // email domain, e.g. "thornfield.manor"
+    pub chief: String,           // display name of the player's boss, e.g. "DCI Marlowe"
+    pub setting: String,         // 2-4 sentences: what happened. Must not name a category.
+    pub crime: String,           // short noun phrase, e.g. "the theft", "the poisoning"
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Case {
+    pub settings: Settings,
+    pub puzzle: Puzzle,          // logicgrid::generate(level.size(), level.difficulty(), seed, theme)
+    pub suspects: Vec<Suspect>,  // one per anchor item, same order
+    pub guilty: Entity,          // the guilty fact: a non-anchor entity chosen from the seed
+    pub culprit: usize,          // anchor item the solution pairs with `guilty`
+    pub frame: Frame,
+}
+impl Case {
+    pub fn new(settings: Settings) -> Case;
+    /// "was in the Study": guilty category phrase with the item filled in.
+    pub fn guilty_fact(&self) -> String;
+    /// Anchor category name lowercased, e.g. "guest".
+    pub fn noun(&self) -> String;
+}
+
+// text.rs
+/// Render a clue as prose. `speaker = Some(i)` renders in first person for suspect i
+/// ("I was in the Study", "I'm not the guest who gave the Wine", "Crane and I sat next
+/// to each other"). `variant` picks among 2-3 wordings; any usize is valid (mod).
+pub fn render(clue: &Clue, p: &Puzzle, speaker: Option<usize>, variant: usize) -> String;
+/// Third-person-singular verb phrase to first person: "owns the Cat" -> "own the Cat",
+/// "is bound to" -> "am bound to", "has" -> "have", "flies" -> "fly", "was" -> "was".
+pub fn first_person(phrase: &str) -> String;
+
+// content.rs (placeholder now; `content` task rewrites). Keep these signatures exactly.
+pub struct FrameData {
+    pub theme: &'static str, pub domain: &'static str, pub chief: &'static str,
+    pub setting: &'static str, pub setting_adult: &'static str,
+    pub crime: &'static str, pub crime_adult: &'static str,
+}
+/// Frame for a theme title; unknown titles get a generic frame.
+pub fn frame(theme: &str) -> &'static FrameData;
+pub struct VoiceData {
+    pub mood: Mood,
+    pub openers: &'static [&'static str], pub openers_adult: &'static [&'static str],
+    pub closers: &'static [&'static str], pub closers_adult: &'static [&'static str],
+    /// Non-answers when the suspect has nothing left on a topic.
+    pub dodges: &'static [&'static str], pub dodges_adult: &'static [&'static str],
+    /// Pressed on a truthful statement; "{stmt}" is replaced with the verbatim statement.
+    pub press_true: &'static [&'static str],
+    /// Pressed on a false statement; "{stmt}" is replaced with a re-rendered variant.
+    pub press_false: &'static [&'static str], pub press_false_subtle: &'static [&'static str],
+    /// Extra hedge sentence when `conscience` is set.
+    pub conscience: &'static [&'static str], pub conscience_adult: &'static [&'static str],
+}
+pub fn voice(mood: Mood) -> &'static VoiceData;
+/// Chief email templates. Placeholders: {setting} {crime} {names} {fact} {noun} {rank}
+/// {epilogue} {culprit} {chief}.
+pub struct ChiefData { pub intro: &'static str, pub nudge: &'static str, pub wrong: &'static str, pub solved: &'static str }
+pub fn chief(adult: bool) -> &'static ChiefData;
+
+// game.rs
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Question { Own, About(usize), Category(Cat), Press }
+impl Question {
+    /// Menu label: "Where were you that night?", "What do you know about Crane?",
+    /// "Tell me about the Motive.", "Press on your last answer."
+    pub fn label(&self, case: &Case) -> String;
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Email { pub from: String, pub subject: String, pub body: String, pub tick: u32, pub read: bool, pub outgoing: bool }
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Rank { Inspector, Detective, Constable }   // 0 wrong accusations, 1, 2+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Game {
+    pub case: Case,
+    pub tick: u32,
+    pub chief: Vec<Email>,          // thread with the chief; starts with the intro email
+    pub threads: Vec<Vec<Email>>,   // one per suspect
+    pub grid: Grid,                 // notepad marks, logicgrid::Grid::new(&case.puzzle)
+    pub notes: String,              // free-text notepad
+    pub wrong: u32,
+    pub presses: u32,
+    pub solved: bool,
+    // private: pending replies (due tick, thread, Email), last statement index per suspect, nudged flag
+}
+impl Game {
+    pub fn new(settings: Settings) -> Game;
+    /// Own, About(every other suspect), Category(every non-anchor category), then Press if
+    /// the suspect has answered at least once. Empty if the suspect is silenced.
+    pub fn questions(&self, suspect: usize) -> Vec<Question>;
+    /// Append the outgoing email, queue the reply for tick+1, advance the tick, deliver due mail.
+    pub fn ask(&mut self, suspect: usize, q: Question);
+    /// Advance the tick and deliver due mail.
+    pub fn wait(&mut self);
+    /// True when suspect == culprit and fact == guilty. Wrong: wrong += 1, accused silenced,
+    /// chief sends `wrong`. Right: solved = true, chief sends `solved` with rank and epilogue.
+    pub fn accuse(&mut self, suspect: usize, fact: Entity) -> bool;
+    /// (truthful statements revealed, truthful statements total).
+    pub fn progress(&self) -> (usize, usize);
+    pub fn rank(&self) -> Rank;
+    /// Unread count; None = chief thread.
+    pub fn unread(&self, thread: Option<usize>) -> usize;
+    /// Mark every email in the thread read.
+    pub fn mark_read(&mut self, thread: Option<usize>);
+    /// Full solution as prose, one sentence per suspect, e.g.
+    /// "Crane was in the Study, was last seen at Midnight, and is driven by Greed."
+    pub fn epilogue(&self) -> String;
+    pub fn to_json(&self) -> String;
+    pub fn from_json(s: &str) -> Result<Game, serde_json::Error>;
+}
+```
+
+# Case generation rules (D1.2-D1.5)
+- `StdRng::seed_from_u64(seed ^ 0xCA5E)` drives every choice below, in a fixed order, so the
+  case is deterministic.
+- Guilty fact: pick a non-anchor category, then an item. culprit = position of that item in
+  `solution.0[cat]`.
+- Liars: choose `level.liars()` suspects at random; on Hard the culprit is always one of them.
+  Moods and conscience are random per suspect (conscience biased true for the culprit).
+- Distribute every clue in `puzzle.clues` as a truthful statement: if the clue mentions an
+  anchor entity, give it to that suspect (the first one mentioned); otherwise give it to the
+  suspect with the fewest statements so far (ties broken by rng). Truthful statements alone
+  therefore always solve the case.
+- False statements for each liar (2 on Medium, 3 on Hard): `Clue::Is(self, wrong item)` or
+  `Clue::IsNot(self, true item)` about the liar's own facts, or `Clue::Is(other suspect,
+  wrong item)`. Verify each is false under the solution with `Clue::holds`. If
+  `level.culprit_lies()`, the culprit's first false statement is `Is(culprit, wrong item in
+  the guilty category)`. Shuffle each suspect's statements.
+- Question matching: Own matches a statement mentioning the speaker; About(s) one mentioning
+  suspect s; Category(c) one mentioning any entity in category c. `ask` reveals the first
+  unrevealed match, else a dodge. Press repeats the last revealed statement from that suspect:
+  truthful -> `press_true` with the verbatim text; false -> `press_false` (or
+  `press_false_subtle` when `level.subtle_tells()`) with `render(.., variant + 1)`.
+- Reply body = opener + " " + statement/dodge + (conscience hedge) + "\n\n" + closer, all
+  drawn from `voice(mood)` with adult variants when `settings.adult`.
+- Chief: intro on `Game::new` (uses frame.setting, suspect names, guilty_fact, frame.crime);
+  nudge once when progress passes half; wrong / solved on accusation.
+- Placeholder content.rs: one generic FrameData, one VoiceData per mood with two entries per
+  list (clean and adult may be identical), one ChiefData. Enough to run; the content task
+  replaces it. Mark the file `// PLACEHOLDER: rewritten by the content task`.
+
+# Done when
+- Tests: determinism (same Settings twice -> identical to_json); every Level x 5 seeds
+  generates a Case whose truthful statements solve to `SolveResult::Unique(puzzle.solution)`
+  via `logicgrid::solve` and whose false statements each fail `Clue::holds`; liar counts match
+  the level; culprit pairs with guilty; `first_person` covers the verbs in
+  logicgrid/src/themes.rs (owns, is, has, flies, was, arrived, claims); `render` with a
+  speaker never yields "I is", "I owns", "is I", or "who I"; `ask` delivers on the next
+  action; Press on truthful repeats verbatim and on false differs; accuse right/wrong paths;
+  progress and rank.
+- `cargo build -p casefile --lib --target wasm32-unknown-unknown` succeeds.
+- Every pub item documented; fmt, test, clippy clean per the plan header.
+- Committed on your branch with no AI attribution trailer. Run `corps task complete`.
+"""
+
+[[task]]
+name = "tui"
+depends_on = ["core"]
+task = """
+# Goal
+Build the `casefile` terminal frontend: ratatui 0.30 screens over the committed core API
+(REQUIREMENTS.md D2.1, D2.3). Read REQUIREMENTS.md section D and casefile/src/{lib,case,game}.rs
+fully. The screen code must be backend-agnostic because the `web` task will reuse it under
+Ratzilla: no crossterm types outside main.rs.
+
+# Owns
+- casefile/src/ui/** (new), casefile/src/main.rs (rewrite)
+- casefile/Cargo.toml: add `ratatui = { version = "0.30", default-features = false }` to
+  [dependencies]; add `[target.'cfg(not(target_arch = "wasm32"))'.dependencies]` with
+  `ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }` and
+  `clap = { version = "4.5", features = ["derive"] }`. Touch nothing else in the file.
+- casefile/src/lib.rs: add exactly `pub mod ui;` (the one line you may touch)
+
+# Don't touch
+- casefile/src/{case,text,game,content}.rs, casefile/tests/** (if the core has a bug, work
+  around it in ui/ and note it in your commit message), logicgrid/**, logictui/**,
+  workspace Cargo.toml, REQUIREMENTS.md, README.md, plans/, corps.toml
+
+# UI contract (the web task codes against exactly this)
+```rust
+// casefile/src/ui/mod.rs
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Key { Up, Down, Left, Right, Enter, Esc, Backspace, Tab, Char(char) }
+pub struct App { /* private */ }
+impl App {
+    /// Start at the setup screen; `seed` seeds the first case unless the player types one.
+    pub fn new(seed: u64) -> App;
+    /// Skip setup (CLI flags).
+    pub fn with_game(game: casefile::Game) -> App;
+    pub fn on_key(&mut self, key: Key);
+    pub fn render(&self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer);
+    pub fn quit(&self) -> bool;
+}
+```
+
+# Screens (ui/screens/*.rs, one file each, all rendering via Buffer like logictui)
+- setup: rows Level < >, Theme < Random | names >, Adult < off | on >, Seed (digits typed,
+  Backspace edits, blank = the seed passed to App::new), Start. Show the adult toggle's
+  meaning in one muted line: profanity, harsher crimes, innuendo; nothing explicit.
+- inbox: left list of threads (Chief first, then each suspect with unread count and a
+  "silent" marker), right preview of the selected thread. Top line: case title, tick,
+  progress gauge (ratatui Gauge, D2.3) from Game::progress, rank. Keys: j/k or arrows,
+  Enter open thread, n notepad, a accuse, w wait for mail, ? help, q quit.
+- thread: emails newest last in a scrollable Paragraph (wrap, j/k scroll), From/Subject
+  header per email, outgoing mail visually distinct. Keys: c compose (suspect threads only),
+  Esc back.
+- compose: list of Question::label for Game::questions(suspect); Enter sends via Game::ask
+  and returns to the thread; Esc cancels.
+- notepad: a suspects x facts table: rows are suspects, column groups are each non-anchor
+  category's items; each cell shows Grid mark (· ✗ ●) between the suspect and that item;
+  Space/Enter cycles Unknown -> No -> Yes, x/o set, Backspace clears. Tab switches focus to
+  the free-text notes box (typing edits Game::notes, Enter newline). Esc back.
+- accuse: step 1 pick a suspect, step 2 pick an item in the guilty category, step 3 confirm
+  (y). Calls Game::accuse; then returns to inbox where the chief's reply waits. When solved,
+  the inbox shows a "Case closed: <rank>" banner.
+- help: overlay listing keys; any key closes.
+
+# main.rs (native only for now; keep it small so the web task can add a wasm entry)
+- `#[cfg(not(target_arch = "wasm32"))] fn main()`: clap flags `--seed`, `--level`, `--theme`
+  (name, case-insensitive), `--adult`; any flag skips setup via App::with_game. Seed defaults
+  to nanoseconds since the epoch. `ratatui::init()`, loop draw + crossterm key events mapped
+  to `Key`, exit when App::quit. Restore the terminal on panic.
+- `#[cfg(target_arch = "wasm32")] fn main() {}` placeholder with a `// web task` comment.
+
+# Done when
+- `cargo run -p casefile -- --level easy --seed 1` plays a full case: ask, press, notepad,
+  accuse, chief reply, banner.
+- Tests (Buffer renders, no terminal): setup -> inbox flow via on_key; inbox renders at
+  80x24 and 120x40 without panic for each Level; compose sends and a reply appears after
+  the next action; notepad cycling updates Game::grid; accuse flow reaches solved on the
+  culprit; Key mapping for clap-free paths.
+- fmt, test, clippy clean per the plan header; `cargo build -p casefile --lib --target
+  wasm32-unknown-unknown` still succeeds (the lib must not pull crossterm).
+- Committed on your branch with no AI attribution trailer. Run `corps task complete`.
+"""
+
+[[task]]
+name = "content"
+depends_on = ["core"]
+task = """
+# Goal
+Replace the placeholder casefile/src/content.rs with the full voice and framing content
+(REQUIREMENTS.md D1.8): a frame for every theme in logicgrid/src/themes.rs, rich voices for
+every Mood, chief templates, all with adult variants. Read REQUIREMENTS.md section D and
+casefile/src/{content,case,text,game}.rs fully. Keep every signature in content.rs exactly.
+
+# Owns
+- casefile/src/content.rs (rewrite wholesale; keep the pub API)
+- casefile/tests/content.rs (new)
+
+# Don't touch
+- Every other file. If the core's use of a template makes a sentence read badly, fix the
+  template, not the core; note any core issue in your commit message.
+
+# Content rules
+- One FrameData per theme title (15 themes: Apartment Block, Dinner Party, Marathon, Flea
+  Market, Cul-de-Sac, Harbor, High School, Heist Crew, Haunted Hotel, Space Station,
+  Bake-Off, Band Tour, Garden Club, Manor Mystery, Coffee Shop) plus the generic fallback.
+  `setting` is 2-4 sentences establishing what happened and why the player is on it. It must
+  never name a category or item, because the generator trims categories and items per case.
+  `crime` is a noun phrase ("the theft of the trophy"). Clean mode: thefts, sabotage,
+  vanished heirlooms, a poisoning at most implied. Adult mode: harsher crimes (a body, a
+  vendetta), profanity, innuendo. Nothing sexually explicit in either mode, no slurs.
+- VoiceData per Mood: at least 5 openers, 4 closers, 4 dodges, 3 press_true, 3 press_false,
+  3 press_false_subtle, 3 conscience lines, each with an adult counterpart list of the same
+  length. Subtle press_false lines must read like a normal reply with the changed statement
+  and at most one hedge word ("I believe", "as far as I recall"); obvious ones stumble
+  openly. press_true lines quote "{stmt}" verbatim. Hostile and Nervous adult voices swear;
+  Cooperative and Chatty mostly don't.
+- ChiefData clean and adult: intro uses {setting} {crime} {names} {fact} {noun}; nudge is
+  short; wrong scolds; solved uses {rank} {culprit} {epilogue}.
+- Every entry is a plain `&'static str`. No runtime formatting beyond the placeholders.
+
+# Done when
+- Test: every theme title from `logicgrid::theme_names()` resolves to a non-generic frame;
+  every list meets the minimum counts and adult lists match clean lengths; no template
+  contains a placeholder the core doesn't fill; a small denylist of explicit terms is absent
+  from every string.
+- A `Case::new` for every theme index x both adult values produces a chief intro that
+  contains every suspect name and `guilty_fact()`.
+- fmt, test, clippy clean per the plan header; wasm lib build still succeeds.
+- Committed on your branch with no AI attribution trailer. Run `corps task complete`.
+"""
+
+[[task]]
+name = "web"
+depends_on = ["tui"]
+task = """
+# Goal
+Make the `casefile` binary build for the browser with Ratzilla and `trunk`, and add a
+GitHub Pages deploy workflow (REQUIREMENTS.md D2.2). Read casefile/src/ui/mod.rs and
+casefile/src/main.rs first. The screen code is already backend-agnostic; you add the wasm
+entry point and the packaging.
+
+# Owns
+- casefile/src/main.rs: the `#[cfg(target_arch = "wasm32")]` entry only. Leave the native
+  path as is apart from moving shared bits into `fn` helpers if needed.
+- casefile/index.html, casefile/Trunk.toml (new)
+- casefile/Cargo.toml: add `[target.'cfg(target_arch = "wasm32")'.dependencies]` with
+  `ratzilla = "0.3"` and `js-sys = "0.3"` (seed from `js_sys::Date::now()`). Nothing else.
+- .github/workflows/pages.yml (new)
+
+# Don't touch
+- casefile/src/ui/**, casefile/src/{lib,case,text,game,content}.rs, casefile/tests/**,
+  logicgrid/**, logictui/**, workspace Cargo.toml, REQUIREMENTS.md, README.md, plans/, corps.toml
+
+# Approach
+- Ratzilla 0.3.1 depends on ratatui ^0.30.1 and re-exports it; the crate already depends on
+  ratatui 0.30 with no default features, so both resolve to one copy. Read
+  https://docs.rs/ratzilla/0.3.1 for `DomBackend::new`, `Terminal::new`, the `WebRenderer`
+  trait (`on_key_event(&mut self, FnMut(KeyEvent))`, `draw_web(self, FnMut(&mut Frame))`),
+  and `ratzilla::event::{KeyCode, KeyEvent}` to map onto `ui::Key`.
+- wasm main: `App::new(js_sys::Date::now() as u64)` in an `Rc<RefCell<App>>`; key handler
+  calls `on_key`; `draw_web` renders `app.render(f.area(), f.buffer_mut())`.
+  `console_error_panic_hook` is pulled in by ratzilla; call its `set_once` if exposed.
+- index.html: `<link data-trunk rel="rust" data-bin="casefile" />`, monospace font, dark
+  background, a one-line title. Trunk.toml sets `[build] target = "index.html"` and
+  `public_url = "./"` so the Pages path works.
+- pages.yml: on push to the configured base branch, install the wasm32 target and trunk
+  (cargo-binstall or `cargo install --locked trunk`), `trunk build --release` inside
+  casefile/, upload `casefile/dist` with actions/upload-pages-artifact, deploy with
+  actions/deploy-pages. Permissions: pages write, id-token write.
+
+# Done when
+- `cd casefile && trunk build --release` succeeds locally (trunk is at /opt/homebrew/bin/trunk;
+  the wasm32-unknown-unknown target is installed) and dist/ contains index.html, a .wasm,
+  and a .js. Do not commit dist/; add `casefile/dist/` to .gitignore (the one line you may
+  add there).
+- `cargo build -p casefile --target wasm32-unknown-unknown` (the bin, not just the lib)
+  succeeds; native `cargo run -p casefile -- --level easy --seed 1` still works.
+- fmt, test, clippy clean per the plan header.
+- Committed on your branch with no AI attribution trailer. Run `corps task complete`.
+"""
+
+[[task]]
+name = "release"
+depends_on = ["web", "content"]
+task = """
+# Goal
+Make casefile distributable: crate metadata for crates.io, a README, a CI workflow, and a
+root README section. Read REQUIREMENTS.md section D, casefile/src/main.rs, and
+casefile/src/ui/screens/*.rs so the docs match the real keys and flags.
+
+# Owns
+- casefile/README.md (new), README.md (add a short "casefile" section linking to it; touch
+  nothing else in the root README)
+- casefile/Cargo.toml: metadata only (readme, keywords, categories, homepage = the GitHub
+  Pages URL https://jbutterwick.github.io/logic-grid-term/). Do not change dependencies.
+- logicgrid/Cargo.toml: metadata only (description, repository, readme, keywords) so it can
+  be published ahead of casefile.
+- .github/workflows/ci.yml (new): fmt check, clippy -D warnings, test, and the wasm lib build
+  on push and pull request.
+
+# Don't touch
+- Any src/ or tests/ file, plans/, corps.toml, REQUIREMENTS.md, .github/workflows/pages.yml
+
+# Done when
+- `cargo package -p logicgrid --no-verify` and `cargo package -p casefile --no-verify`
+  succeed (casefile's path dependency already carries a version).
+- casefile/README.md covers: what the game is, install (`cargo install casefile`), the web
+  URL, CLI flags, every screen's keys, the adult toggle's boundary, how seeds reproduce a
+  case, and how liars and pressing work (without spoiling the solving strategy beyond that).
+- fmt, test, clippy clean per the plan header.
+- Committed on your branch with no AI attribution trailer. Run `corps task complete`.
+"""
