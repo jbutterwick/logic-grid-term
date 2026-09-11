@@ -23,9 +23,25 @@ pub fn dir() -> PathBuf {
         .join("logictui")
 }
 
-/// `<seed>-<cats>x<items>-<label>`
+/// `<seed>-<cats>x<items>-<label>[-<theme>]`
 pub fn key(p: &Puzzle, label: &str) -> String {
-    format!("{}-{}x{}-{}", p.seed, p.n_cats(), p.n_items(), label)
+    let theme: String = p
+        .title
+        .chars()
+        .filter_map(|c| match c {
+            ' ' | '-' => Some('-'),
+            c if c.is_ascii_alphanumeric() => Some(c.to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect();
+    let sep = if theme.is_empty() { "" } else { "-" };
+    format!(
+        "{}-{}x{}-{}{sep}{theme}",
+        p.seed,
+        p.n_cats(),
+        p.n_items(),
+        label
+    )
 }
 
 pub fn save(dir: &Path, key: &str, progress: &Progress) -> io::Result<()> {

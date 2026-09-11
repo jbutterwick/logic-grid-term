@@ -21,7 +21,7 @@ fn a4_1_property_unique_and_minimal() {
     for (cats, items) in SIZES {
         for d in DIFFS {
             for seed in 0..7 {
-                let p = generate(Size { cats, items }, d, seed);
+                let p = generate(Size { cats, items }, d, seed, None);
                 let ctx = format!("{cats}x{items} {d:?} seed {seed}");
                 assert_eq!(p.n_cats(), cats, "{ctx}");
                 assert_eq!(p.n_items(), items, "{ctx}");
@@ -55,14 +55,14 @@ fn a4_1_property_unique_and_minimal() {
 fn a3_2_deterministic() {
     for (cats, items) in SIZES {
         for d in DIFFS {
-            let a = generate(Size { cats, items }, d, 42).to_json();
-            let b = generate(Size { cats, items }, d, 42).to_json();
+            let a = generate(Size { cats, items }, d, 42, None).to_json();
+            let b = generate(Size { cats, items }, d, 42, None).to_json();
             assert_eq!(a, b);
         }
     }
     assert_ne!(
-        generate(Size { cats: 4, items: 4 }, Difficulty::Hard, 1).to_json(),
-        generate(Size { cats: 4, items: 4 }, Difficulty::Hard, 2).to_json()
+        generate(Size { cats: 4, items: 4 }, Difficulty::Hard, 1, None).to_json(),
+        generate(Size { cats: 4, items: 4 }, Difficulty::Hard, 2, None).to_json()
     );
 }
 
@@ -72,7 +72,7 @@ fn a3_4_difficulty_clue_types() {
     for (cats, items) in SIZES {
         for seed in 0..7 {
             let size = Size { cats, items };
-            let easy = generate(size, Difficulty::Easy, seed);
+            let easy = generate(size, Difficulty::Easy, seed, None);
             assert!(
                 easy.clues
                     .iter()
@@ -80,7 +80,7 @@ fn a3_4_difficulty_clue_types() {
                 "easy {cats}x{items} seed {seed}: {:?}",
                 easy.clues
             );
-            let hard = generate(size, Difficulty::Hard, seed);
+            let hard = generate(size, Difficulty::Hard, seed, None);
             assert!(
                 hard.clues.iter().any(is_ordinal),
                 "hard {cats}x{items} seed {seed} has no ordinal clue: {:?}",
@@ -111,7 +111,7 @@ fn a3_6_timing_5x5_hard() {
     let worst = (0..5)
         .map(|seed| {
             let t = Instant::now();
-            generate(Size { cats: 5, items: 5 }, Difficulty::Hard, seed);
+            generate(Size { cats: 5, items: 5 }, Difficulty::Hard, seed, None);
             t.elapsed()
         })
         .max()
@@ -127,13 +127,13 @@ fn a3_6_timing_5x5_hard() {
 fn a1_5_themes_vary_and_render() {
     let names: std::collections::HashSet<String> = (0..30)
         .map(|s| {
-            generate(Size { cats: 5, items: 5 }, Difficulty::Easy, s).categories[0]
+            generate(Size { cats: 5, items: 5 }, Difficulty::Easy, s, None).categories[0]
                 .name
                 .clone()
         })
         .collect();
     assert!(names.len() >= 3, "only saw anchors {names:?}");
-    let p = generate(Size { cats: 5, items: 5 }, Difficulty::Hard, 3);
+    let p = generate(Size { cats: 5, items: 5 }, Difficulty::Hard, 3, None);
     for c in &p.clues {
         assert!(!c.text(&p).is_empty());
     }

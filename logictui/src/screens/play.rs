@@ -1,12 +1,13 @@
 //! Play screen: triangular grid + clue panel (B2).
 
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 use logicgrid::{Cat, Entity, Grid, Mark, Puzzle};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Widget, Wrap};
@@ -17,7 +18,10 @@ use crate::theme;
 
 /// Width of one grid cell in columns (mark + spacer).
 const CW: u16 = 2;
-const MAX_LABEL: usize = 8;
+// Longest theme label ("Locker 101"); themes.rs has a test pinning this.
+const MAX_LABEL: usize = 10;
+/// Breathing room between the terminal edge and the play screen.
+const MARGIN: Margin = Margin::new(2, 1);
 
 pub struct PlayScreen {
     puzzle: Puzzle,
@@ -33,8 +37,12 @@ pub struct PlayScreen {
     /// Cells auto-marked No by a Yes, keyed by the Yes cell that placed them.
     auto: Auto,
     help: bool,
+    /// Intro blurb overlay; shown on open, reopened with `i`.
+    intro: bool,
     solved: bool,
     status: String,
+    /// (x, y) of the top-left mark cell from the last render, for mouse clicks.
+    origin: Cell<(u16, u16)>,
 }
 
 /// Row-block categories top to bottom: anchor, then n-1 down to 2.
@@ -108,6 +116,7 @@ impl PlayScreen {
             Some(pr) => (pr.grid, pr.struck, pr.solved),
             None => (Grid::new(&puzzle), vec![false; puzzle.clues.len()], false),
         };
+        let intro = !puzzle.intro.is_empty();
         PlayScreen {
             grid,
             struck,
@@ -122,7 +131,9 @@ impl PlayScreen {
             // ponytail: not persisted; after a restore, un-Yes keeps its auto-Nos.
             auto: Auto::new(),
             help: false,
+            intro,
             status: String::new(),
+            origin: Cell::new((0, 0)),
         }
     }
 
@@ -165,6 +176,22 @@ impl PlayScreen {
         }
     }
 
+    /// Move the cursor to the mark cell under screen position (x, y), if any.
+    pub fn on_click(&mut self, x: u16, y: u16) {
+        let (ox, oy) = self.origin.get();
+        let (Some(dx), Some(dy)) = (x.checked_sub(ox), y.checked_sub(oy)) else {
+            return;
+        };
+        let (m, bw) = (self.m(), self.m() * CW as usize + 1);
+        let (dx, dy) = (dx as usize, dy as usize);
+        let (bj, ij) = (dx / bw, (dx % bw) / CW as usize);
+        let (bi, ii) = (dy / (m + 1), dy % (m + 1));
+        let next = (bi * m + ii, bj * m + ij);
+        if ij < m && ii < m && bi + 1 < self.n() && bj + 1 < self.n() && self.valid(next) {
+            self.cursor = next;
+        }
+    }
+
     fn set_mark(&mut self, m: Mark) {
         let (a, b) = self.entities(self.cursor);
         self.undo.push((self.grid.clone(), self.auto.clone()));
@@ -203,8 +230,8 @@ impl PlayScreen {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) -> Transition {
-        if self.help {
-            self.help = false;
+        if self.help || self.intro {
+            (self.help, self.intro) = (false, false);
             return Transition::None;
         }
         let (a, b) = self.entities(self.cursor);
@@ -248,6 +275,7 @@ impl PlayScreen {
                 };
             }
             KeyCode::Char('?') => self.help = true,
+            KeyCode::Char('i') => self.intro = !self.puzzle.intro.is_empty(),
             KeyCode::Char('w') => {
                 let path = format!("{}.json", storage::key(&self.puzzle, &self.label));
                 self.status = match std::fs::write(&path, self.puzzle.to_json()) {
@@ -295,19 +323,37 @@ impl PlayScreen {
     }
 
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
-        let (gw, _) = self.grid_size();
-        let [main, status] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
+        let (gw, gh) = self.grid_size();
+        // ponytail: drop the vertical margin on short terminals so headers stay full height.
+        let vm = u16::from(area.height >= gh + 1 + 2 * MARGIN.vertical);
+        let [main, status] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)])
+            .areas(area.inner(Margin::new(MARGIN.horizontal, vm)));
         let [grid_area, clue_area] =
             Layout::horizontal([Constraint::Length(gw + 1), Constraint::Min(20)]).areas(main);
         self.render_grid(grid_area, buf);
+        let [info, clue_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(clue_area);
+        let (a, b) = self.entities(self.cursor);
+        let mark = match self.grid.get(a, b) {
+            Mark::Unknown => "-",
+            Mark::No => "✗",
+            Mark::Yes => "●",
+        };
+        Line::from(format!(
+            " {} x {}: {mark}",
+            self.puzzle.name(a),
+            self.puzzle.name(b)
+        ))
+        .fg(theme::ACCENT)
+        .render(info, buf);
         self.render_clues(clue_area, buf);
         let seed = format!(
-            "seed {} · {}x{} {} · ? help · q quit",
+            "seed {} · {}x{} {} · {} · ? help · q quit",
             self.puzzle.seed,
             self.n(),
             self.m(),
-            self.label
+            self.label,
+            self.puzzle.title
         );
         Line::from(vec![
             Span::from(seed).fg(theme::MUTED),
@@ -330,6 +376,16 @@ impl PlayScreen {
         if self.help {
             popup(area, buf, " Help ", HELP.lines().map(Line::from).collect());
         }
+        if self.intro {
+            let w = (area.width.saturating_sub(6) as usize).clamp(20, 60);
+            let mut lines: Vec<Line> = wrap(&self.puzzle.intro, w)
+                .into_iter()
+                .map(Line::from)
+                .collect();
+            lines.push(Line::from(""));
+            lines.push(Line::from("any key to begin · i reopens").fg(theme::MUTED));
+            popup(area, buf, &format!(" {} ", self.puzzle.title), lines);
+        }
     }
 
     fn render_grid(&self, area: Rect, buf: &mut Buffer) {
@@ -345,6 +401,7 @@ impl PlayScreen {
         let bw = m as u16 * CW + 1; // block width incl. gap
         let col_x = |bj: usize, ij: usize| area.x + left + bj as u16 * bw + ij as u16 * CW;
         let row_y = |bi: usize, ii: usize| area.y + 1 + hh + (bi * (m + 1) + ii) as u16;
+        self.origin.set((col_x(0, 0), row_y(0, 0)));
         let put = |buf: &mut Buffer, x: u16, y: u16, s: &str, st: Style| {
             if x < area.right() && y < area.bottom() {
                 buf.set_stringn(x, y, s, (area.right() - x) as usize, st);
@@ -353,6 +410,7 @@ impl PlayScreen {
         let (cur_a, cur_b) = self.entities(self.cursor);
         let dim = Style::new().fg(theme::MUTED);
         let bold = Style::new().fg(theme::ACCENT).bold();
+        let hi = Style::new().fg(theme::CURSOR_BG).bold();
 
         for (bj, &c) in cc.iter().enumerate() {
             put(
@@ -363,13 +421,18 @@ impl PlayScreen {
                 bold,
             );
             for (ij, item) in self.puzzle.categories[c].items.iter().enumerate() {
+                let st = if (Entity { cat: c, item: ij }) == cur_b {
+                    hi
+                } else {
+                    dim
+                };
                 for (k, ch) in item.chars().take(hh as usize).enumerate() {
                     put(
                         buf,
                         col_x(bj, ij),
                         area.y + 1 + k as u16,
                         &ch.to_string(),
-                        dim,
+                        st,
                     );
                 }
             }
@@ -386,7 +449,12 @@ impl PlayScreen {
             let name_x = area.x + catw - 1 - hh_full;
             for (ii, item) in self.puzzle.categories[r].items.iter().enumerate() {
                 let label: String = item.chars().take(MAX_LABEL).collect();
-                put(buf, name_x, row_y(bi, ii), &label, dim);
+                let st = if (Entity { cat: r, item: ii }) == cur_a {
+                    hi
+                } else {
+                    dim
+                };
+                put(buf, name_x, row_y(bi, ii), &label, st);
                 for (bj, &c) in cc.iter().enumerate() {
                     if !block_exists(n, bi, bj) {
                         continue;
@@ -398,6 +466,9 @@ impl PlayScreen {
                             Mark::No => ("✗", Style::new().fg(theme::NO)),
                             Mark::Yes => ("●", Style::new().fg(theme::YES).bold()),
                         };
+                        if a == cur_a || b == cur_b {
+                            st = st.bg(theme::CROSSHAIR_BG);
+                        }
                         if self
                             .bad
                             .iter()
@@ -494,10 +565,28 @@ s               strike selected clue
 1-9             strike clue N
 Tab / n / p     select clue
 c               check for contradictions
+i               story intro
 w               write puzzle JSON to cwd
 Esc             back to menu
 q               quit
 any key closes this";
+
+/// Greedy word wrap to `width` columns.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut out = vec![String::new()];
+    for word in text.split_whitespace() {
+        let cur = out.last_mut().expect("non-empty");
+        if !cur.is_empty() && cur.chars().count() + 1 + word.chars().count() > width {
+            out.push(word.to_string());
+        } else {
+            if !cur.is_empty() {
+                cur.push(' ');
+            }
+            cur.push_str(word);
+        }
+    }
+    out
+}
 
 fn popup(area: Rect, buf: &mut Buffer, title: &str, lines: Vec<Line>) {
     let h = lines.len() as u16 + 2;
@@ -521,6 +610,31 @@ mod tests {
 
     fn e(cat: usize, item: usize) -> Entity {
         Entity { cat, item }
+    }
+
+    #[test]
+    fn click_maps_screen_cell_to_cursor() {
+        let mut s = PlayScreen::new(fixtures::four(), "t".into(), PathBuf::new());
+        let mut buf = Buffer::empty(Rect::new(0, 0, 120, 40));
+        s.render(buf.area, &mut buf);
+        let (a, b) = s.entities(s.cursor);
+        let row0: String = (0..120)
+            .map(|x| buf[(x, MARGIN.vertical)].symbol())
+            .collect();
+        assert!(row0.contains(&format!("{} x {}: -", s.puzzle.name(a), s.puzzle.name(b))));
+        let (ox, oy) = s.origin.get();
+        let m = s.m() as u16;
+        // second block right, third row: skips block gap and spacer columns.
+        s.on_click(ox + m * CW + 1 + CW, oy + 2);
+        assert_eq!(s.cursor, (2, m as usize + 1));
+        // gap column between blocks and empty triangle corner are ignored.
+        let before = s.cursor;
+        s.on_click(ox + m * CW, oy);
+        s.on_click(
+            ox + (s.n() as u16 - 2) * (m * CW + 1),
+            oy + (s.n() as u16 - 2) * (m + 1),
+        );
+        assert_eq!(s.cursor, before);
     }
 
     #[test]
@@ -572,6 +686,24 @@ mod tests {
     }
 
     #[test]
+    fn intro_shows_once_and_reopens() {
+        let mut p = fixtures::four();
+        assert!(!PlayScreen::new(p.clone(), "t".into(), PathBuf::new()).intro);
+        p.title = "Test".into();
+        p.intro = "one two three four five six seven".into();
+        let mut s = PlayScreen::new(p, "t".into(), PathBuf::new());
+        assert!(s.intro);
+        s.on_key(KeyEvent::from(KeyCode::Char('x')));
+        assert!(!s.intro && s.grid.get(e(0, 0), e(1, 0)) == Mark::Unknown);
+        s.on_key(KeyEvent::from(KeyCode::Char('i')));
+        assert!(s.intro);
+        assert_eq!(
+            wrap("one two three four five six seven", 10),
+            ["one two", "three four", "five six", "seven"]
+        );
+    }
+
+    #[test]
     fn cursor_stays_inside_staircase() {
         let mut s = PlayScreen::new(fixtures::four(), "t".into(), std::env::temp_dir());
         for _ in 0..20 {
@@ -594,7 +726,8 @@ mod tests {
                 std::env::temp_dir(),
             );
             let (gw, gh) = s.grid_size();
-            assert!(gw + 20 <= w && gh < h, "{n}: grid {gw}x{gh} in {w}x{h}");
+            let w2 = w - 2 * MARGIN.horizontal;
+            assert!(gw + 20 <= w2 && gh < h, "{n}: grid {gw}x{gh} in {w2}x{h}");
             let mut buf = Buffer::empty(Rect::new(0, 0, w, h));
             s.render(Rect::new(0, 0, w, h), &mut buf); // must not panic
         }

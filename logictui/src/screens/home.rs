@@ -1,4 +1,4 @@
-//! Home screen: pick size and difficulty (B1.1), resume recent puzzles (B3.3).
+//! Home screen: pick size, difficulty, and theme (B1.1), resume recent puzzles (B3.3).
 
 use std::path::Path;
 
@@ -20,23 +20,32 @@ const DIFFS: [Difficulty; 3] = [Difficulty::Easy, Difficulty::Medium, Difficulty
 pub struct HomeScreen {
     size: usize,
     diff: usize,
-    /// 0 = size row, 1 = difficulty row, 2.. = recent list.
+    /// 0 = random, i+1 = theme i.
+    theme: usize,
+    themes: Vec<&'static str>,
+    /// 0 = size row, 1 = difficulty, 2 = theme, 3.. = recent list.
     row: usize,
     recent: Vec<(String, Progress)>,
 }
+
+/// Rows above the recent list.
+const FIXED_ROWS: usize = 3;
 
 impl HomeScreen {
     pub fn new(dir: &Path) -> Self {
         HomeScreen {
             size: 2,
             diff: 1,
+            theme: 0,
+            themes: logicgrid::theme_names().collect(),
             row: 0,
             recent: storage::list(dir),
         }
     }
 
     pub fn on_key(&mut self, key: KeyEvent) -> Transition {
-        let rows = 2 + self.recent.len();
+        let rows = FIXED_ROWS + self.recent.len();
+        let nt = self.themes.len() + 1;
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return Transition::Quit,
             KeyCode::Up | KeyCode::Char('k') => self.row = self.row.saturating_sub(1),
@@ -44,21 +53,24 @@ impl HomeScreen {
             KeyCode::Left | KeyCode::Char('h') => match self.row {
                 0 => self.size = (self.size + SIZES.len() - 1) % SIZES.len(),
                 1 => self.diff = (self.diff + DIFFS.len() - 1) % DIFFS.len(),
+                2 => self.theme = (self.theme + nt - 1) % nt,
                 _ => {}
             },
             KeyCode::Right | KeyCode::Char('l') => match self.row {
                 0 => self.size = (self.size + 1) % SIZES.len(),
                 1 => self.diff = (self.diff + 1) % DIFFS.len(),
+                2 => self.theme = (self.theme + 1) % nt,
                 _ => {}
             },
             KeyCode::Enter => {
-                if self.row < 2 {
+                if self.row < FIXED_ROWS {
                     let (cats, items) = SIZES[self.size];
                     let d = DIFFS[self.diff];
-                    let p = logicgrid::generate(Size { cats, items }, d, crate::random_seed());
+                    let t = self.theme.checked_sub(1);
+                    let p = logicgrid::generate(Size { cats, items }, d, crate::random_seed(), t);
                     return Transition::Play(p, diff_name(d));
                 }
-                let (_, pr) = &self.recent[self.row - 2];
+                let (_, pr) = &self.recent[self.row - FIXED_ROWS];
                 return Transition::Play(pr.puzzle.clone(), pr.label.clone());
             }
             _ => {}
@@ -75,6 +87,10 @@ impl HomeScreen {
             }
         };
         let (c, i) = SIZES[self.size];
+        let theme = self
+            .theme
+            .checked_sub(1)
+            .map_or("Random", |t| self.themes[t]);
         let mut lines = vec![
             Line::from("logictui").fg(theme::ACCENT).bold(),
             Line::from(""),
@@ -83,6 +99,7 @@ impl HomeScreen {
                 format!("  Difficulty:  < {} >", diff_name(DIFFS[self.diff])),
                 sel(1),
             ),
+            Line::styled(format!("  Theme:       < {theme} >"), sel(2)),
             Line::from(""),
             Line::from("  j/k pick row · h/l change · Enter play · q quit").fg(theme::MUTED),
             Line::from(""),
@@ -91,7 +108,10 @@ impl HomeScreen {
             lines.push(Line::from("Recent").fg(theme::ACCENT).bold());
             for (idx, (key, pr)) in self.recent.iter().enumerate() {
                 let status = if pr.solved { "solved" } else { "in progress" };
-                lines.push(Line::styled(format!("  {key}  ({status})"), sel(idx + 2)));
+                lines.push(Line::styled(
+                    format!("  {key}  ({status})"),
+                    sel(idx + FIXED_ROWS),
+                ));
             }
         }
         Paragraph::new(lines)

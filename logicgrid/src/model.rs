@@ -7,12 +7,27 @@ use serde::{Deserialize, Serialize};
 use crate::Clue;
 
 /// A named category with its display items (e.g. "Pet": Cat, Dog, Fish).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// The flavor strings are optional; when any non-anchor category lacks `phrase`, clues fall
+/// back to plain "X goes with Y" wording.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Category {
     /// Display name of the category.
     pub name: String,
     /// Display names of the items; for ordered categories, index order is the ordinal order.
     pub items: Vec<String>,
+    /// Verb phrase with `{}` for the item, e.g. "owns the {}" → "owns the Cat".
+    #[serde(default)]
+    pub phrase: String,
+    /// Ordered categories: "lives on a lower floor than".
+    #[serde(default)]
+    pub less: String,
+    /// Ordered categories: "lives on a higher floor than".
+    #[serde(default)]
+    pub more: String,
+    /// Ordered categories, plural verb phrase: "live on adjacent floors".
+    #[serde(default)]
+    pub adjacent: String,
 }
 
 /// Index into `Puzzle::categories`.
@@ -80,6 +95,12 @@ pub struct Puzzle {
     pub solution: Solution,
     /// Seed the puzzle was generated from.
     pub seed: u64,
+    /// Theme name, e.g. "Dinner Party". Empty for hand-written puzzles.
+    #[serde(default)]
+    pub title: String,
+    /// Scene-setting blurb shown before play.
+    #[serde(default)]
+    pub intro: String,
 }
 
 impl Puzzle {

@@ -3,18 +3,28 @@
 
 use rand::prelude::*;
 
-use crate::themes::THEMES;
+use crate::themes::{THEMES, Theme};
 use crate::{Cat, Category, Clue, Difficulty, Entity, Puzzle, Size, Solution, SolveResult, solve};
+
+/// Names of the built-in themes, indexable by `generate`'s `theme` argument.
+pub fn theme_names() -> impl Iterator<Item = &'static str> {
+    THEMES.iter().map(|t| t.name)
+}
 
 /// Generate a puzzle with exactly one solution and a minimal clue set (A3.1–A3.7).
 ///
-/// Deterministic in `(size, difficulty, seed)`. Supports 3–5 categories of 3–5 items; a size
-/// outside the theme bank is clamped to it.
-pub fn generate(size: Size, difficulty: Difficulty, seed: u64) -> Puzzle {
+/// Deterministic in `(size, difficulty, seed, theme)`. `theme` indexes [`theme_names`]; `None`
+/// picks one from the seed. Supports 3–5 categories of 3–5 items; a size outside the theme
+/// bank is clamped to it.
+pub fn generate(size: Size, difficulty: Difficulty, seed: u64, theme: Option<usize>) -> Puzzle {
     let n = size.cats.clamp(3, 5);
     let m = size.items.clamp(3, 5);
     let mut rng = StdRng::seed_from_u64(seed);
-    let (categories, ordered) = pick_theme(&mut rng, n, m);
+    let theme = match theme {
+        Some(i) => &THEMES[i % THEMES.len()],
+        None => THEMES.choose(&mut rng).expect("theme bank is non-empty"),
+    };
+    let (categories, ordered) = pick_theme(&mut rng, theme, n, m);
     let solution = random_solution(&mut rng, n, m);
     let clues = candidates(&solution, &ordered, difficulty, n, m);
     let unique =
@@ -42,6 +52,8 @@ pub fn generate(size: Size, difficulty: Difficulty, seed: u64) -> Puzzle {
         clues: chosen,
         solution,
         seed,
+        title: theme.name.into(),
+        intro: theme.intro.into(),
     }
 }
 
@@ -77,8 +89,8 @@ fn minimal_unique(
 
 /// Pick a theme and trim it to `n` categories × `m` items, keeping the anchor and at least one
 /// ordered category. Ordered items keep their relative order.
-fn pick_theme(rng: &mut StdRng, n: usize, m: usize) -> (Vec<Category>, Vec<bool>) {
-    let theme = THEMES.choose(rng).expect("theme bank is non-empty");
+fn pick_theme(rng: &mut StdRng, theme: &Theme, n: usize, m: usize) -> (Vec<Category>, Vec<bool>) {
+    let theme = &theme.cats;
     let mut rest: Vec<usize> = (1..theme.len()).collect();
     rest.shuffle(rng);
     rest.truncate(n - 1);
@@ -103,6 +115,10 @@ fn pick_theme(rng: &mut StdRng, n: usize, m: usize) -> (Vec<Category>, Vec<bool>
             Category {
                 name: t.name.into(),
                 items: idx.into_iter().map(|j| t.items[j].to_string()).collect(),
+                phrase: t.phrase.into(),
+                less: t.less.into(),
+                more: t.more.into(),
+                adjacent: t.adjacent.into(),
             }
         })
         .collect();

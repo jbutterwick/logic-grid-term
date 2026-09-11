@@ -6,6 +6,7 @@ fn cat(name: &str, items: &[&str]) -> Category {
     Category {
         name: name.into(),
         items: items.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
     }
 }
 
@@ -49,6 +50,8 @@ pub fn four() -> Puzzle {
             vec![0, 2, 3, 1],
         ]),
         seed: 4,
+        title: String::new(),
+        intro: String::new(),
     }
 }
 
@@ -101,6 +104,8 @@ pub fn five() -> Puzzle {
             vec![1, 0, 4, 2, 3],
         ]),
         seed: 5,
+        title: String::new(),
+        intro: String::new(),
     }
 }
 

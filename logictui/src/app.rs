@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use logicgrid::{Difficulty, Puzzle};
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyEventKind, MouseButton, MouseEventKind};
 
 use crate::screens::home::HomeScreen;
 use crate::screens::play::PlayScreen;
@@ -55,8 +55,15 @@ impl App {
                 Screen::Home(s) => s.render(f.area(), f.buffer_mut()),
                 Screen::Play(s) => s.render(f.area(), f.buffer_mut()),
             })?;
-            let Event::Key(key) = event::read()? else {
-                continue;
+            let key = match event::read()? {
+                Event::Key(key) => key,
+                Event::Mouse(me) if me.kind == MouseEventKind::Down(MouseButton::Left) => {
+                    if let Screen::Play(s) = &mut self.screen {
+                        s.on_click(me.column, me.row);
+                    }
+                    continue;
+                }
+                _ => continue,
             };
             if key.kind != KeyEventKind::Press {
                 continue;

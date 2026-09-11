@@ -1,8 +1,11 @@
+use std::io;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use logicgrid::{Difficulty, Puzzle, Size};
+use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use ratatui::crossterm::execute;
 
 mod app;
 mod fixtures;
@@ -24,6 +27,12 @@ struct Cli {
     /// Generator seed; random if omitted.
     #[arg(long)]
     seed: Option<u64>,
+    /// Theme name (see --list-themes); random if omitted.
+    #[arg(long)]
+    theme: Option<String>,
+    /// Print the theme names and exit.
+    #[arg(long)]
+    list_themes: bool,
     /// Write the generated/loaded puzzle JSON here and exit.
     #[arg(long)]
     save: Option<PathBuf>,
@@ -50,17 +59,29 @@ fn pick(cli: &Cli) -> Result<Option<(Puzzle, String)>, String> {
     if let Some(n) = cli.fixture {
         return Ok(Some((fixtures::fixture(n)?, "fixture".into())));
     }
-    if cli.size.is_none() && cli.difficulty.is_none() {
+    if cli.size.is_none() && cli.difficulty.is_none() && cli.theme.is_none() {
         return Ok(None);
     }
+    let theme = match &cli.theme {
+        None => None,
+        Some(name) => Some(
+            logicgrid::theme_names()
+                .position(|t| t.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("unknown theme {name:?}; see --list-themes"))?,
+        ),
+    };
     let size = cli.size.unwrap_or(Size { cats: 4, items: 4 });
     let diff = cli.difficulty.unwrap_or(Difficulty::Medium);
-    let puzzle = logicgrid::generate(size, diff, cli.seed.unwrap_or_else(random_seed));
+    let puzzle = logicgrid::generate(size, diff, cli.seed.unwrap_or_else(random_seed), theme);
     Ok(Some((puzzle, app::diff_name(diff))))
 }
 
 fn main() {
     let cli = Cli::parse();
+    if cli.list_themes {
+        logicgrid::theme_names().for_each(|t| println!("{t}"));
+        return;
+    }
     let picked = pick(&cli).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(1);
@@ -83,7 +104,9 @@ fn main() {
     };
     // ratatui::init installs a panic hook that restores the terminal (B4.1).
     let mut terminal = ratatui::init();
+    let _ = execute!(io::stdout(), EnableMouseCapture);
     let result = app.run(&mut terminal);
+    let _ = execute!(io::stdout(), DisableMouseCapture);
     ratatui::restore();
     if let Err(e) = result {
         eprintln!("{e}");
@@ -112,6 +135,16 @@ mod tests {
         assert_eq!(cli.seed, Some(7));
         assert!(Cli::try_parse_from(["logictui", "--size", "big"]).is_err());
         assert!(Cli::try_parse_from(["logictui", "--difficulty", "brutal"]).is_err());
+    }
+
+    #[test]
+    fn theme_flag_selects_theme() {
+        let cli =
+            Cli::try_parse_from(["logictui", "--theme", "heist crew", "--seed", "1"]).unwrap();
+        let (p, _) = pick(&cli).unwrap().unwrap();
+        assert_eq!(p.title, "Heist Crew");
+        let cli = Cli::try_parse_from(["logictui", "--theme", "nope"]).unwrap();
+        assert!(pick(&cli).is_err());
     }
 
     #[test]

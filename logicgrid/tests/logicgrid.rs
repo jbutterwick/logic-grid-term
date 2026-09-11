@@ -13,6 +13,7 @@ fn cat(name: &str, items: &[&str]) -> Category {
     Category {
         name: name.into(),
         items: items.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
     }
 }
 
@@ -50,6 +51,8 @@ fn four_by_four() -> Puzzle {
             vec![1, 3, 0, 2],
         ]),
         seed: 0,
+        title: String::new(),
+        intro: String::new(),
     }
 }
 
@@ -267,6 +270,7 @@ fn a2_2_random_consistent_clues_never_none() {
             .map(|c| Category {
                 name: format!("C{c}"),
                 items: (0..m).map(|i| format!("{c}-{i}")).collect(),
+                ..Default::default()
             })
             .collect();
         let mut sol = vec![(0..m).collect::<Vec<_>>()];
@@ -341,7 +345,7 @@ fn a2_3_grid_contradictions_and_solved() {
 
 #[test]
 fn placeholder_generate_is_unique_and_valid() {
-    let p = generate(Size { cats: 4, items: 4 }, Difficulty::Hard, 7);
+    let p = generate(Size { cats: 4, items: 4 }, Difficulty::Hard, 7, None);
     assert_eq!(p.seed, 7);
     assert!(p.validate().is_ok());
     assert_eq!(solve_p(&p), SolveResult::Unique(p.solution.clone()));
