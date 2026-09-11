@@ -11,6 +11,7 @@ mod case;
 mod content;
 mod game;
 mod text;
+pub mod ui;
 
 pub use case::{Case, Frame, Level, Mood, Settings, Statement, Suspect};
 pub use content::{ChiefData, FrameData, VoiceData, chief, frame, voice};
