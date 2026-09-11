@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository = "https://github.com/jbutterwick/logic-grid-term"
+homepage = "https://jbutterwick.github.io/logic-grid-term/"
+readme = "README.md"
+keywords = ["game", "puzzle", "detective", "tui", "wasm"]
+categories = ["games", "command-line-utilities", "wasm"]
 
 [dependencies]
 logicgrid = { path = "../logicgrid", version = "0.1.0" }

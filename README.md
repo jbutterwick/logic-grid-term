@@ -58,3 +58,10 @@ The home screen lists recent puzzles with their solve status.
 
 Placing a Yes marks the rest of its row and column in that sub-grid as No.
 A 4x4 puzzle fits an 80x24 terminal; 5x5 fits 120x40.
+
+## casefile
+
+`casefile` is an email-inbox detective game built on the same puzzles: interrogate
+suspects, spot the liars, and accuse. Play it in the browser at
+<https://jbutterwick.github.io/logic-grid-term/> or `cargo install casefile`.
+See [casefile/README.md](casefile/README.md) for flags and keys.
