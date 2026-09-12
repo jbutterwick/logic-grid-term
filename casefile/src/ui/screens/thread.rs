@@ -2,12 +2,12 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Widget, Wrap};
+use ratatui::text::Line;
+use ratatui::widgets::{Paragraph, Widget, Wrap};
 
-use super::footer;
-use crate::Email;
-use crate::ui::{App, BOLD, Key, MUTED, OUTGOING, Screen};
+use super::inbox::inset;
+use crate::ui::chrome::{self, Tab};
+use crate::ui::{App, Key, Screen};
 
 pub(crate) fn on_key(app: &mut App, key: Key) {
     match key {
@@ -20,7 +20,7 @@ pub(crate) fn on_key(app: &mut App, key: Key) {
         Key::Up | Key::Char('k') => app.scroll = app.scroll.saturating_sub(1),
         Key::Down | Key::Char('j') => {
             // ponytail: clamp to unwrapped line count; wrapped text can scroll a little short.
-            let n = lines(app).len() as u16;
+            let n = lines(app, 80).len() as u16;
             app.scroll = (app.scroll + 1).min(n.saturating_sub(1));
         }
         _ => {}
@@ -29,53 +29,46 @@ pub(crate) fn on_key(app: &mut App, key: Key) {
 
 pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
     let g = app.game();
-    let (name, hint) = match app.thread() {
-        None => (g.case.frame.chief.clone(), "j/k scroll  Esc back"),
+    let (title, right, keys): (String, String, &[(&str, &str)]) = match app.thread() {
+        None => (
+            g.case.frame.chief.clone(),
+            format!("{} mail", g.chief.len()),
+            &[("j/k", "scroll"), ("Esc", "back")],
+        ),
         Some(i) if g.case.suspects[i].silenced => (
             g.case.suspects[i].email.clone(),
-            "j/k scroll  Esc back  (silent)",
+            "silent".to_string(),
+            &[("j/k", "scroll"), ("Esc", "back")],
         ),
         Some(i) => (
             g.case.suspects[i].email.clone(),
-            "j/k scroll  c compose  Esc back",
+            format!("{} mail", g.threads[i].len()),
+            &[("j/k", "scroll"), ("c", "compose"), ("Esc", "back")],
         ),
     };
-    let area = footer(hint, area, buf);
-    let block = Block::bordered().title(format!(" {name} "));
-    let inner = block.inner(area);
-    block.render(area, buf);
-    Paragraph::new(lines(app))
+    let area = chrome::header(app, Some(Tab::Inbox), area, buf);
+    let area = chrome::footer(app, keys, area, buf);
+    let inner = chrome::frame(app, &title.to_uppercase(), Some(&right), true, area, buf);
+    let inner = inset(inner);
+    let lines = lines(app, inner.width);
+    Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((app.scroll, 0))
         .render(inner, buf);
+    chrome::noise(app, inner, buf);
 }
 
-fn lines(app: &App) -> Vec<Line<'static>> {
+fn lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let g = app.game();
     let mails = match app.thread() {
         None => &g.chief,
         Some(i) => &g.threads[i],
     };
     if mails.is_empty() {
-        return vec![Line::from("No mail yet. Press c to compose.").style(MUTED)];
+        return vec![Line::from("No mail yet. Press c to compose.").style(app.look.muted())];
     }
-    mails.iter().flat_map(email_lines).collect()
-}
-
-/// Header plus body plus a blank line; outgoing mail is tinted.
-pub(crate) fn email_lines(e: &Email) -> Vec<Line<'static>> {
-    let tint = if e.outgoing { OUTGOING } else { BOLD };
-    let mut out = vec![
-        Line::from(Span::styled(format!("From: {}", e.from), tint)),
-        Line::from(Span::styled(
-            format!("Subject: {}   (tick {})", e.subject, e.tick),
-            MUTED,
-        )),
-    ];
-    for l in e.body.lines() {
-        let l = Line::from(l.to_string());
-        out.push(if e.outgoing { l.style(OUTGOING) } else { l });
-    }
-    out.push(Line::from(""));
-    out
+    mails
+        .iter()
+        .flat_map(|e| chrome::mail_lines(app, e, width))
+        .collect()
 }

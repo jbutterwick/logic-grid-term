@@ -2,9 +2,10 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
-use ratatui::widgets::{Block, Clear, Paragraph, Widget};
+use ratatui::widgets::{Clear, Paragraph, Widget};
 
 use crate::ui::App;
+use crate::ui::chrome;
 
 const TEXT: &str = "\
 Setup    ↑↓ move   ←→ change   digits seed   Enter start
@@ -16,16 +17,15 @@ Notepad  hjkl move   Space cycle   x no   o yes   Backspace clear
 Accuse   j/k move   Enter next   y confirm   Esc back
 ?        this help   (any key closes)";
 
-pub(crate) fn render(_app: &App, area: Rect, buf: &mut Buffer) {
+pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
     let [v] = Layout::vertical([Constraint::Length(11)])
         .flex(Flex::Center)
         .areas(area);
-    let [box_area] = Layout::horizontal([Constraint::Length(72)])
+    let [box_area] = Layout::horizontal([Constraint::Length(74)])
         .flex(Flex::Center)
         .areas(v);
     Clear.render(box_area, buf);
-    let block = Block::bordered().title(" Keys ");
-    let inner = block.inner(box_area);
-    block.render(box_area, buf);
+    buf.set_style(box_area, app.look.text());
+    let inner = chrome::frame(app, "KEYS", None, true, box_area, buf);
     Paragraph::new(TEXT).render(inner, buf);
 }

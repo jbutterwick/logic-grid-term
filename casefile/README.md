@@ -23,12 +23,29 @@ a case directly.
 | `--level L` | `easy`, `medium`, or `hard` (default `easy`) |
 | `--theme NAME` | Theme name, case-insensitive. Random if omitted; an unknown name prints the list and exits. |
 | `--adult` | Profanity, harsher crimes, innuendo. Nothing explicit. |
+| `--phosphor P` | Screen colour: `green` (default), `amber`, or `white`. Does not skip setup. |
+| `--plain` | No static. The screen only redraws on a key press or resize. |
 
 ```sh
 casefile --level hard --theme "Haunted Hotel" --seed 42
 ```
 
-The web build always starts at the setup screen; type a seed there.
+## Web build
+
+The browser build takes the same settings as query parameters, so a case is a
+link: `?seed=42&level=hard&theme=Haunted%20Hotel` opens straight into that
+case, and `?phosphor=amber` picks the colour. Without a seed, level, or theme it
+starts at the setup screen.
+
+The grid fills the window and recomputes its columns whenever the window
+changes size or the font loads. Under about seventy columns the panes stack
+instead of sitting side by side, so a phone gets the thread list above the
+mail. Touch screens get a row of soft keys under the screen for the current
+screen's actions; `?keys=on` or `?keys=off` forces the bar either way.
+
+The CRT glass (glow, scanlines, grain, vignette, flicker, and the barrel bend)
+is CSS in `crt.css`. `?fx=off` turns it off along with the in-grid static,
+and `prefers-reduced-motion` stops the animated parts.
 
 ## Seeds
 
@@ -85,9 +102,10 @@ terminal build from anywhere.
 
 | Key | Action |
 |-----|--------|
-| `↑`/`↓`, `j`/`k`, `Tab` | Move between Level, Theme, Adult, Seed, Start |
+| `↑`/`↓`, `j`/`k`, `Tab` | Move between Level, Theme, Adult, Screen, Seed, Start |
 | `←`/`→`, `h`/`l` | Change the selected value |
 | digits, `Backspace` | Edit the seed |
+| `←`/`→` on Screen | Cycle the phosphor: green, amber, white |
 | `Enter` | Next row, or start on the Start row |
 | `Esc` | Quit |
 

@@ -12,6 +12,8 @@ mod content;
 mod game;
 mod text;
 pub mod ui;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 
 pub use case::{Case, Frame, Level, Mood, Settings, Statement, Suspect};
 pub use content::{ChiefData, FrameData, VoiceData, chief, frame, voice};

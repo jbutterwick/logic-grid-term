@@ -3,10 +3,11 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget};
 
-use super::footer;
-use crate::ui::{App, HILITE, Key, MUTED, Screen, step};
+use super::inbox::inset;
+use crate::ui::chrome::{self, Tab};
+use crate::ui::{App, Key, Screen, step};
 
 pub(crate) fn on_key(app: &mut App, key: Key) {
     let Some(s) = app.thread() else {
@@ -29,26 +30,37 @@ pub(crate) fn on_key(app: &mut App, key: Key) {
 
 pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
     let g = app.game();
-    let area = footer("j/k move  Enter send  Esc cancel", area, buf);
+    let t = &app.look;
+    let area = chrome::header(app, Some(Tab::Inbox), area, buf);
+    let area = chrome::footer(
+        app,
+        &[("j/k", "move"), ("Enter", "send"), ("Esc", "cancel")],
+        area,
+        buf,
+    );
     let Some(s) = app.thread() else { return };
-    let block = Block::bordered().title(format!(" To: {} ", g.case.suspects[s].email));
-    let inner = block.inner(area);
-    block.render(area, buf);
+    let title = format!("TO: {}", g.case.suspects[s].email);
+    let inner = inset(chrome::frame(app, &title, Some("compose"), true, area, buf));
     let qs = g.questions(s);
     let lines: Vec<Line> = if qs.is_empty() {
-        vec![Line::from("They won't talk to you any more.").style(MUTED)]
+        vec![Line::from("They won't talk to you any more.").style(t.muted())]
     } else {
         qs.iter()
             .enumerate()
             .map(|(i, q)| {
-                let l = Line::from(q.label(&g.case));
+                let label = q.label(&g.case);
                 if i == app.compose_sel {
-                    l.style(HILITE)
+                    Line::from(format!(
+                        "▸ {label:<w$}",
+                        w = usize::from(inner.width).saturating_sub(2)
+                    ))
+                    .style(t.inverted())
                 } else {
-                    l
+                    Line::from(format!("  {label}"))
                 }
             })
             .collect()
     };
     Paragraph::new(lines).render(inner, buf);
+    chrome::noise(app, inner, buf);
 }

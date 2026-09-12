@@ -1,16 +1,20 @@
-//! Setup: level, theme, adult toggle, seed, start.
+//! Setup: level, theme, adult toggle, screen phosphor, seed, start.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget, Wrap};
 
-use super::footer;
+use super::inbox::inset;
 use crate::Level;
-use crate::ui::{App, BOLD, HILITE, Key, MUTED};
+use crate::ui::chrome;
+use crate::ui::theme::Phosphor;
+use crate::ui::{App, Key};
 
 const LEVELS: [Level; 3] = [Level::Easy, Level::Medium, Level::Hard];
-const ROWS: usize = 5;
+const ROWS: usize = 6;
+const SEED_ROW: usize = 4;
+const START_ROW: usize = 5;
 
 pub(crate) fn on_key(app: &mut App, key: Key) {
     let themes = crate::theme_names().len();
@@ -38,30 +42,45 @@ pub(crate) fn on_key(app: &mut App, key: Key) {
                     }
                 }
                 2 => app.adult = !app.adult,
+                3 => {
+                    let all = Phosphor::ALL;
+                    let i = all.iter().position(|&p| p == app.phosphor()).unwrap_or(0);
+                    let n = all.len();
+                    app.set_phosphor(all[(i + if fwd { 1 } else { n - 1 }) % n]);
+                }
                 _ => {}
             }
         }
-        Key::Char(c) if app.setup_row == 3 && c.is_ascii_digit() && app.seed_text.len() < 19 => {
+        Key::Char(c)
+            if app.setup_row == SEED_ROW && c.is_ascii_digit() && app.seed_text.len() < 19 =>
+        {
             app.seed_text.push(c)
         }
-        Key::Backspace if app.setup_row == 3 => {
+        Key::Backspace if app.setup_row == SEED_ROW => {
             app.seed_text.pop();
         }
-        Key::Enter if app.setup_row == 4 => app.start(),
+        Key::Enter if app.setup_row == START_ROW => app.start(),
         Key::Enter => app.setup_row += 1,
         _ => {}
     }
 }
 
 pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
-    let area = footer(
-        "↑↓ move  ←→ change  Enter start  ? help  Esc quit",
+    let t = &app.look;
+    let area = chrome::header(app, None, area, buf);
+    let area = chrome::footer(
+        app,
+        &[
+            ("↑↓", "move"),
+            ("←→", "change"),
+            ("Enter", "start"),
+            ("?", "help"),
+            ("Esc", "quit"),
+        ],
         area,
         buf,
     );
-    let block = Block::bordered().title(" casefile ");
-    let inner = block.inner(area);
-    block.render(area, buf);
+    let inner = inset(chrome::frame(app, "NEW CASE", None, true, area, buf));
     let theme = match app.theme {
         None => "Random".to_string(),
         Some(i) => crate::theme_names()[i].to_string(),
@@ -75,22 +94,34 @@ pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
         format!("< {} >", app.level.name()),
         format!("< {theme} >"),
         format!("< {} >", if app.adult { "on" } else { "off" }),
+        format!("< {} >", app.phosphor().name()),
         seed,
         String::new(),
     ];
-    let labels = ["Level", "Theme", "Adult", "Seed", "Start"];
-    let mut lines = vec![Line::from("Open a new case").style(BOLD), Line::from("")];
+    let labels = ["Level", "Theme", "Adult", "Screen", "Seed", "Start"];
+    let mut lines = vec![
+        Line::from("Open a new case").style(t.bright()),
+        Line::from(""),
+    ];
     for (i, (label, value)) in labels.iter().zip(values).enumerate() {
-        let style = if i == app.setup_row { HILITE } else { BOLD };
+        let selected = i == app.setup_row;
+        let marker = if selected { "▸" } else { " " };
+        let label_style = if selected { t.inverted() } else { t.bright() };
         lines.push(Line::from(vec![
-            Span::styled(format!("{label:<7}"), style),
-            Span::raw(" "),
+            Span::raw(format!("{marker} ")),
+            Span::styled(format!(" {label:<7}"), label_style),
+            Span::raw("  "),
             Span::raw(value),
         ]));
     }
     lines.push(Line::from(""));
     lines.push(
-        Line::from("Adult: profanity, harsher crimes, innuendo; nothing explicit.").style(MUTED),
+        Line::from("Adult: profanity, harsher crimes, innuendo; nothing explicit.")
+            .style(t.muted()),
     );
-    Paragraph::new(lines).render(inner, buf);
+    lines.push(Line::from("Screen: the phosphor the case glows in.").style(t.muted()));
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .render(inner, buf);
+    chrome::noise(app, inner, buf);
 }

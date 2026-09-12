@@ -3,13 +3,16 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
 
 use crate::{Game, Level, Settings};
 
+mod chrome;
 mod screens;
 #[cfg(test)]
 mod tests;
+mod theme;
+
+pub use theme::{Phosphor, Theme};
 
 /// A key press, already stripped of backend detail.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -43,6 +46,12 @@ pub struct App {
     pub(crate) help: bool,
     pub(crate) quit: bool,
     pub(crate) game: Option<Game>,
+    /// Palette every screen paints from.
+    pub(crate) look: Theme,
+    /// Frames drawn so far; seeds the static.
+    pub(crate) frame: u64,
+    /// Static on or off.
+    pub(crate) fx: bool,
     // setup
     pub(crate) seed: u64,
     pub(crate) setup_row: usize,
@@ -64,11 +73,6 @@ pub struct App {
     pub(crate) accuse_item: usize,
 }
 
-pub(crate) const HILITE: Style = Style::new().add_modifier(Modifier::REVERSED);
-pub(crate) const MUTED: Style = Style::new().fg(Color::DarkGray);
-pub(crate) const BOLD: Style = Style::new().add_modifier(Modifier::BOLD);
-pub(crate) const OUTGOING: Style = Style::new().fg(Color::Cyan);
-
 impl App {
     /// Start at the setup screen; `seed` seeds the first case unless the player types one.
     pub fn new(seed: u64) -> App {
@@ -77,6 +81,9 @@ impl App {
             help: false,
             quit: false,
             game: None,
+            look: Theme::default(),
+            frame: 0,
+            fx: true,
             seed,
             setup_row: 0,
             level: Level::Easy,
@@ -101,6 +108,87 @@ impl App {
         app.game = Some(game);
         app.screen = Screen::Inbox;
         app
+    }
+
+    /// Swap the phosphor; takes effect on the next draw.
+    pub fn set_phosphor(&mut self, phosphor: Phosphor) {
+        self.look = Theme::new(phosphor);
+    }
+
+    /// The phosphor in use.
+    pub fn phosphor(&self) -> Phosphor {
+        self.look.phosphor
+    }
+
+    /// The palette in use, for a host that paints outside the grid.
+    pub fn theme(&self) -> &Theme {
+        &self.look
+    }
+
+    /// Turn the static on or off.
+    pub fn set_fx(&mut self, on: bool) {
+        self.fx = on;
+    }
+
+    /// Count `frames` drawn; the static reseeds every sixth frame, so a host that redraws
+    /// ten times a second should pass 6 and one that redraws at 60 Hz should pass 1.
+    pub fn advance(&mut self, frames: u64) {
+        self.frame = self.frame.wrapping_add(frames);
+    }
+
+    /// Frames drawn so far.
+    pub fn frame(&self) -> u64 {
+        self.frame
+    }
+
+    /// On-screen buttons for a host without a keyboard: label and the key each one sends.
+    pub fn soft_keys(&self) -> Vec<(&'static str, Key)> {
+        use Key::*;
+        if self.help {
+            return vec![("CLOSE", Esc)];
+        }
+        match self.screen {
+            Screen::Setup => vec![
+                ("▲", Up),
+                ("▼", Down),
+                ("◀", Left),
+                ("▶", Right),
+                ("START", Enter),
+            ],
+            Screen::Inbox => vec![
+                ("▲", Up),
+                ("▼", Down),
+                ("OPEN", Enter),
+                ("WAIT", Char('w')),
+                ("NOTEPAD", Char('n')),
+                ("ACCUSE", Char('a')),
+                ("?", Char('?')),
+            ],
+            Screen::Thread => vec![
+                ("▲", Up),
+                ("▼", Down),
+                ("COMPOSE", Char('c')),
+                ("BACK", Esc),
+            ],
+            Screen::Compose => vec![("▲", Up), ("▼", Down), ("SEND", Enter), ("BACK", Esc)],
+            Screen::Notepad => vec![
+                ("▲", Up),
+                ("▼", Down),
+                ("◀", Left),
+                ("▶", Right),
+                ("MARK", Char(' ')),
+                ("NOTES", Tab),
+                ("BACK", Esc),
+            ],
+            Screen::Accuse => vec![
+                ("▲", Up),
+                ("▼", Down),
+                ("NEXT", Enter),
+                ("YES", Char('y')),
+                ("NO", Char('n')),
+                ("BACK", Esc),
+            ],
+        }
     }
 
     /// Feed one key press to whichever screen is active.

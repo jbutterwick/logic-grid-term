@@ -1,7 +1,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use super::{App, Key, Screen};
+use super::{App, Key, Phosphor, Screen};
 use crate::{Entity, Game, Level, Mark, Settings};
 
 const LEVELS: [Level; 3] = [Level::Easy, Level::Medium, Level::Hard];
@@ -42,11 +42,13 @@ fn setup_to_inbox() {
     let mut app = App::new(42);
     assert_eq!(app.screen, Screen::Setup);
     draw(&app, 80, 24);
-    // Level -> medium, theme -> first, adult on, seed 7, start.
+    // Level -> medium, theme -> first, adult on, screen -> amber, seed 7, start.
     keys(
         &mut app,
         &[Key::Right, Key::Down, Key::Right, Key::Down, Key::Right],
     );
+    keys(&mut app, &[Key::Down, Key::Right]);
+    assert_eq!(app.phosphor(), Phosphor::Amber);
     keys(&mut app, &[Key::Down, Key::Char('7'), Key::Char('x')]);
     draw(&app, 80, 24);
     keys(&mut app, &[Key::Down, Key::Enter]);
@@ -62,10 +64,8 @@ fn setup_to_inbox() {
 #[test]
 fn setup_blank_seed_uses_default_and_matches_with_game() {
     let mut app = App::new(1);
-    keys(
-        &mut app,
-        &[Key::Down, Key::Down, Key::Down, Key::Down, Key::Enter],
-    );
+    keys(&mut app, &[Key::Down; 5]);
+    app.on_key(Key::Enter);
     let direct = App::with_game(game(Level::Easy));
     assert_eq!(app.game().to_json(), direct.game().to_json());
     assert_eq!(direct.screen, Screen::Inbox);
@@ -74,14 +74,18 @@ fn setup_blank_seed_uses_default_and_matches_with_game() {
 #[test]
 fn every_screen_renders_at_common_sizes() {
     for level in LEVELS {
-        for (w, h) in [(80, 24), (120, 40)] {
+        for (w, h) in [(80, 24), (120, 40), (48, 36)] {
             let mut app = App::with_game(game(level));
             let out = text(&draw(&app, w, h));
             assert!(
                 out.contains(&app.game().case.frame.title),
                 "{level:?} {w}x{h}"
             );
-            assert!(out.contains("facts"), "gauge missing at {level:?} {w}x{h}");
+            let (done, total) = app.game().progress();
+            assert!(
+                out.contains(&format!("{done}/{total}")),
+                "gauge missing at {level:?} {w}x{h}"
+            );
             app.on_key(Key::Char('?'));
             draw(&app, w, h);
             app.on_key(Key::Enter);

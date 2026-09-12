@@ -3,9 +3,9 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use casefile::ui::{App, Key};
+    use casefile::ui::{App, Key, Phosphor};
     use casefile::{Game, Level, Settings};
     use clap::Parser;
     use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -25,6 +25,12 @@ fn main() {
         /// Profanity, harsher crimes, innuendo; nothing explicit.
         #[arg(long)]
         adult: bool,
+        /// Screen phosphor: green | amber | white. Also on the setup screen.
+        #[arg(long)]
+        phosphor: Option<Phosphor>,
+        /// No static: a still screen that only redraws on a key.
+        #[arg(long)]
+        plain: bool,
     }
 
     let cli = Cli::parse();
@@ -57,6 +63,12 @@ fn main() {
     } else {
         App::new(seed)
     };
+    if let Some(p) = cli.phosphor {
+        app.set_phosphor(p);
+    }
+    app.set_fx(!cli.plain);
+    // Static shimmers at 10 Hz; a plain screen only needs to notice resizes.
+    let tick = Duration::from_millis(if cli.plain { 1000 } else { 100 });
 
     // ratatui::init installs a panic hook that restores the terminal.
     let mut terminal = ratatui::init();
@@ -64,6 +76,10 @@ fn main() {
         terminal
             .draw(|f| app.render(f.area(), f.buffer_mut()))
             .expect("draw");
+        if !event::poll(tick).expect("poll") {
+            app.advance(6);
+            continue;
+        }
         let Ok(Event::Key(k)) = event::read() else {
             continue;
         };
@@ -92,36 +108,11 @@ fn main() {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use casefile::ui::App;
 
-    use casefile::ui::{App, Key};
-    use ratzilla::event::KeyCode;
-    use ratzilla::{DomBackend, WebRenderer};
-
-    let app = Rc::new(RefCell::new(App::new(js_sys::Date::now() as u64)));
-    let backend = DomBackend::new().expect("dom backend");
-    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
-    terminal
-        .on_key_event({
-            let app = app.clone();
-            move |k| {
-                let key = match k.code {
-                    KeyCode::Up => Key::Up,
-                    KeyCode::Down => Key::Down,
-                    KeyCode::Left => Key::Left,
-                    KeyCode::Right => Key::Right,
-                    KeyCode::Enter => Key::Enter,
-                    KeyCode::Esc => Key::Esc,
-                    KeyCode::Backspace => Key::Backspace,
-                    KeyCode::Tab => Key::Tab,
-                    KeyCode::Char(c) => Key::Char(c),
-                    _ => return,
-                };
-                app.borrow_mut().on_key(key);
-            }
-        })
-        .expect("key handler");
     // ponytail: quit() is ignored on the web; there is no terminal to give back.
-    terminal.draw_web(move |f| app.borrow().render(f.area(), f.buffer_mut()));
+    let app = App::new(js_sys::Date::now() as u64);
+    if let Err(e) = casefile::web::run(app) {
+        web_sys::console::error_1(&e);
+    }
 }

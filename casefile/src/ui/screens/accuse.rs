@@ -3,11 +3,12 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget, Wrap};
 
-use super::footer;
+use super::inbox::inset;
 use crate::Entity;
-use crate::ui::{App, BOLD, HILITE, Key, MUTED, Screen, step};
+use crate::ui::chrome::{self, Tab};
+use crate::ui::{App, Key, Screen, step};
 
 pub(crate) fn on_key(app: &mut App, key: Key) {
     let g = app.game();
@@ -37,34 +38,46 @@ pub(crate) fn on_key(app: &mut App, key: Key) {
 
 pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
     let g = app.game();
+    let t = &app.look;
     let c = &g.case;
     let cat = &c.puzzle.categories[c.guilty.cat];
-    let hint = match app.accuse_step {
-        2 => "y confirm  n back  Esc back",
-        _ => "j/k move  Enter next  Esc back",
+    let keys: &[(&str, &str)] = match app.accuse_step {
+        2 => &[("y", "confirm"), ("n", "back"), ("Esc", "back")],
+        _ => &[("j/k", "move"), ("Enter", "next"), ("Esc", "back")],
     };
-    let area = footer(hint, area, buf);
-    let block = Block::bordered().title(" Accuse ");
-    let inner = block.inner(area);
-    block.render(area, buf);
+    let area = chrome::header(app, Some(Tab::Accuse), area, buf);
+    let area = chrome::footer(app, keys, area, buf);
+    let step_label = format!("step {} of 3", app.accuse_step + 1);
+    let inner = inset(chrome::frame(
+        app,
+        "ACCUSE",
+        Some(&step_label),
+        true,
+        area,
+        buf,
+    ));
+    let w = usize::from(inner.width).saturating_sub(2);
     let pick = |items: Vec<String>, sel: usize| -> Vec<Line<'static>> {
         items
             .into_iter()
             .enumerate()
             .map(|(i, s)| {
-                let l = Line::from(s);
-                if i == sel { l.style(HILITE) } else { l }
+                if i == sel {
+                    Line::from(format!("▸ {s:<w$}")).style(t.inverted())
+                } else {
+                    Line::from(format!("  {s}"))
+                }
             })
             .collect()
     };
     let suspect = &c.suspects[app.accuse_suspect];
     let mut lines = vec![
-        Line::from("A wrong accusation costs rank and silences the accused.").style(MUTED),
+        Line::from("A wrong accusation costs rank and silences the accused.").style(t.muted()),
         Line::from(""),
     ];
     match app.accuse_step {
         0 => {
-            lines.push(Line::from(format!("Step 1: which {}?", c.noun())).style(BOLD));
+            lines.push(Line::from(format!("Step 1: which {}?", c.noun())).style(t.bright()));
             lines.extend(pick(
                 c.suspects.iter().map(|s| s.name.clone()).collect(),
                 app.accuse_suspect,
@@ -72,21 +85,25 @@ pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
         }
         1 => {
             lines.push(
-                Line::from(format!("Step 2: {} and the {}?", suspect.name, cat.name)).style(BOLD),
+                Line::from(format!("Step 2: {} and the {}?", suspect.name, cat.name))
+                    .style(t.bright()),
             );
             lines.extend(pick(cat.items.clone(), app.accuse_item));
         }
         _ => {
             let fact = cat.phrase.replace("{}", &cat.items[app.accuse_item]);
-            lines.push(Line::from("Step 3: send this to the chief?").style(BOLD));
+            lines.push(Line::from("Step 3: send this to the chief?").style(t.bright()));
             lines.push(Line::from(format!(
                 "I accuse {}: the {} who {fact}.",
                 suspect.name,
                 c.noun()
             )));
             lines.push(Line::from(""));
-            lines.push(Line::from("[y] yes   [n] no").style(MUTED));
+            lines.push(Line::from("[y] yes   [n] no").style(t.muted()));
         }
     }
-    Paragraph::new(lines).render(inner, buf);
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .render(inner, buf);
+    chrome::noise(app, inner, buf);
 }
