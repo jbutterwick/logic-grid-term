@@ -9,7 +9,7 @@ use crate::ui::chrome;
 
 const TEXT: &str = "\
 Setup    ↑↓ move   ←→ change   digits seed   Enter start
-Inbox    j/k move   Enter open   n notepad   a accuse   w wait   q quit
+Inbox    j/k move   Enter open   n notepad   a accuse   w wait   e effects   q quit
 Thread   j/k scroll   c compose (suspects)   Esc back
 Compose  j/k move   Enter send   Esc cancel
 Notepad  hjkl move   Space cycle   x no   o yes   Backspace clear

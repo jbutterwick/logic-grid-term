@@ -142,9 +142,15 @@ impl App {
         self.legend
     }
 
-    /// Turn the static on or off.
+    /// Turn the static on or off. On the web this also drives the CRT glass, so off is
+    /// the plain terminal look.
     pub fn set_fx(&mut self, on: bool) {
         self.fx = on;
+    }
+
+    /// Whether the static (and, on the web, the glass) is on.
+    pub fn fx(&self) -> bool {
+        self.fx
     }
 
     /// Count `frames` drawn. The static reseeds every [`App::set_static_every`] frames
@@ -194,6 +200,7 @@ impl App {
                 ("WAIT", Char('w')),
                 ("NOTEPAD", Char('n')),
                 ("ACCUSE", Char('a')),
+                ("FX", Char('e')),
                 ("?", Char('?')),
             ],
             Screen::Thread => vec![

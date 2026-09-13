@@ -49,6 +49,8 @@ fn setup_to_inbox() {
     );
     keys(&mut app, &[Key::Down, Key::Right]);
     assert_eq!(app.phosphor(), Phosphor::Amber);
+    keys(&mut app, &[Key::Down, Key::Left]);
+    assert!(!app.fx(), "effects row toggles the static");
     keys(&mut app, &[Key::Down, Key::Char('7'), Key::Char('x')]);
     draw(&app, 80, 24);
     keys(&mut app, &[Key::Down, Key::Enter]);
@@ -64,7 +66,7 @@ fn setup_to_inbox() {
 #[test]
 fn setup_blank_seed_uses_default_and_matches_with_game() {
     let mut app = App::new(1);
-    keys(&mut app, &[Key::Down; 5]);
+    keys(&mut app, &[Key::Down; 6]);
     app.on_key(Key::Enter);
     let direct = App::with_game(game(Level::Easy));
     assert_eq!(app.game().to_json(), direct.game().to_json());
@@ -225,4 +227,18 @@ fn quit_and_help() {
     let mut app = App::new(3);
     app.on_key(Key::Esc);
     assert!(app.quit());
+}
+
+#[test]
+fn inbox_e_toggles_effects_and_static_follows() {
+    let mut app = App::with_game(game(Level::Easy));
+    assert!(app.fx());
+    let noisy = text(&draw(&app, 80, 24));
+    app.on_key(Key::Char('e'));
+    assert!(!app.fx());
+    let plain = text(&draw(&app, 80, 24));
+    // The gauge is drawn in ░ too, so compare counts rather than presence.
+    let dots = |s: &str| s.matches(['░', '▒', '·']).count();
+    assert!(dots(&noisy) > dots(&plain) + 5, "{noisy}\n{plain}");
+    assert!(!plain.contains('▒') && !plain.contains('·'));
 }

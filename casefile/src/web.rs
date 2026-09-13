@@ -60,6 +60,11 @@ impl DomGrid {
         Ok(grid)
     }
 
+    /// Re-measure on the next [`DomGrid::refresh`], as after the page around the grid moved.
+    pub fn mark_dirty(&self) {
+        self.dirty.set(true);
+    }
+
     /// The background every cell shares; cells painted in it carry no background of their own.
     pub fn set_bg(&mut self, bg: Color) {
         self.bg = bg;
@@ -280,6 +285,20 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
     let screen = document.get_element_by_id("screen").ok_or("no #screen")?;
     let keys = document.get_element_by_id("keys").ok_or("no #keys")?;
 
+    // Remembered look, then the link's own parameters on top.
+    let storage = window.local_storage().ok().flatten();
+    let stored = |key: &str| {
+        storage
+            .as_ref()
+            .and_then(|s| s.get_item(key).ok().flatten())
+    };
+    if let Some(p) = stored("casefile.phosphor").and_then(|p| p.parse::<Phosphor>().ok()) {
+        app.set_phosphor(p);
+    }
+    if stored("casefile.fx").as_deref() == Some("off") {
+        app.set_fx(false);
+    }
+    let mut classes: Vec<&str> = Vec::new();
     if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&window.location().search()?) {
         let seed = params.get("seed").and_then(|s| s.parse::<u64>().ok());
         let level = params.get("level").and_then(|l| l.parse::<Level>().ok());
@@ -290,12 +309,15 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
         });
         let adult = params.get("adult").is_some_and(|a| a != "off" && a != "0");
         if seed.is_some() || level.is_some() || theme.is_some() || adult {
+            let (phosphor, fx) = (app.phosphor(), app.fx());
             app = App::with_game(Game::new(Settings {
                 seed: seed.unwrap_or_else(|| js_sys::Date::now() as u64),
                 level: level.unwrap_or(Level::Easy),
                 theme,
                 adult,
             }));
+            app.set_phosphor(phosphor);
+            app.set_fx(fx);
         }
         if let Some(p) = params
             .get("phosphor")
@@ -303,20 +325,19 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
         {
             app.set_phosphor(p);
         }
-        let mut classes = Vec::new();
-        if params.get("fx").as_deref() == Some("off") {
-            app.set_fx(false);
-            classes.push("plain");
+        match params.get("fx").as_deref() {
+            Some("off") => app.set_fx(false),
+            Some("on") => app.set_fx(true),
+            _ => {}
         }
         match params.get("keys").as_deref() {
             Some("on") => classes.push("keys"),
             Some("off") => classes.push("nokeys"),
             _ => {}
         }
-        if let Some(body) = document.body() {
-            body.set_class_name(&classes.join(" "));
-        }
     }
+    let body = document.body().ok_or("no body")?;
+    let base_classes = classes.join(" ");
 
     // A browser repaint runs the CRT filter over the whole tube, so hold the static longer
     // than the terminal does: four reseeds a second at 60 Hz.
@@ -369,7 +390,9 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
     // palette change, or a resize; an idle frame costs a few comparisons.
     let mut last_keys: Vec<&'static str> = Vec::new();
     let mut last_phosphor: Option<Phosphor> = None;
+    let mut last_fx: Option<bool> = None;
     let mut last_seed: Option<u64> = None;
+    let mut bar_h: f64 = -1.0;
     let root = document.document_element().ok_or("no root")?;
     let root: web_sys::HtmlElement = root.dyn_into()?;
     let frame: FrameLoop = Rc::new(RefCell::new(None));
@@ -383,9 +406,22 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
                 last_seed = Some(app.static_seed());
                 redraw = true;
             }
+            if last_fx != Some(app.fx()) {
+                last_fx = Some(app.fx());
+                redraw = true;
+                // Off is the terminal look: no glass, no filter, no glow.
+                let plain = if app.fx() { "" } else { " plain" };
+                body.set_class_name(&format!("{base_classes}{plain}"));
+                if let Some(s) = &storage {
+                    let _ = s.set_item("casefile.fx", if app.fx() { "on" } else { "off" });
+                }
+            }
             if last_phosphor != Some(app.phosphor()) {
                 last_phosphor = Some(app.phosphor());
                 redraw = true;
+                if let Some(s) = &storage {
+                    let _ = s.set_item("casefile.phosphor", app.phosphor().name());
+                }
                 let t = app.theme();
                 let style = root.style();
                 for (name, color) in [
@@ -417,19 +453,28 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
                     })
                     .collect();
                 keys.set_inner_html(&html);
+                bar_h = -1.0;
             }
         }
         let probe = app.borrow().frame().is_multiple_of(30);
         if terminal.backend_mut().refresh(probe) {
             redraw = true;
         }
-        if probe {
-            // Soft keys on screen (a touch layout, or ?keys=on) make the legend redundant.
-            let soft_visible = web_sys::window()
-                .and_then(|w| w.get_computed_style(&keys).ok().flatten())
-                .and_then(|s| s.get_property_value("display").ok())
-                .is_some_and(|d| d != "none");
+        if probe || bar_h < 0.0 {
+            // The bar wraps to however many rows it needs, and it comes and goes with the
+            // media query; give the tube whatever is left, and drop the legend while the
+            // labelled keys are on screen.
+            let h = keys.get_bounding_client_rect().height();
+            if h != bar_h {
+                bar_h = h;
+                let _ = root.style().set_property("--keys-h", &format!("{h}px"));
+                terminal.backend_mut().mark_dirty();
+                if terminal.backend_mut().refresh(true) {
+                    redraw = true;
+                }
+            }
             let mut app = app.borrow_mut();
+            let soft_visible = h > 0.0;
             if app.legend() == soft_visible {
                 app.set_legend(!soft_visible);
                 redraw = true;

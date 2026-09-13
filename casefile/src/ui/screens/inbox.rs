@@ -28,6 +28,7 @@ pub(crate) fn on_key(app: &mut App, key: Key) {
             app.screen = Screen::Accuse;
         }
         Key::Char('w') => app.game_mut().wait(),
+        Key::Char('e') => app.fx = !app.fx,
         _ => step(&mut app.inbox_sel, key, n),
     }
 }
@@ -44,6 +45,7 @@ pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
             ("n", "notepad"),
             ("a", "accuse"),
             ("w", "wait"),
+            ("e", "effects"),
             ("?", "help"),
             ("q", "quit"),
         ],

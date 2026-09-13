@@ -150,7 +150,8 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  height: var(--keys-h);
+  /* Wraps to as many rows as the screen needs; the Rust side copies the height into
+     --keys-h so the tube ends where the bar begins. */
   box-sizing: border-box;
   padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   gap: 6px;

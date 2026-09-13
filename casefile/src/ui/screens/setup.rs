@@ -1,4 +1,4 @@
-//! Setup: level, theme, adult toggle, screen phosphor, seed, start.
+//! Setup: level, theme, adult toggle, screen phosphor, effects, seed, start.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -12,9 +12,9 @@ use crate::ui::theme::Phosphor;
 use crate::ui::{App, Key};
 
 const LEVELS: [Level; 3] = [Level::Easy, Level::Medium, Level::Hard];
-const ROWS: usize = 6;
-const SEED_ROW: usize = 4;
-const START_ROW: usize = 5;
+const ROWS: usize = 7;
+const SEED_ROW: usize = 5;
+const START_ROW: usize = 6;
 
 pub(crate) fn on_key(app: &mut App, key: Key) {
     let themes = crate::theme_names().len();
@@ -48,6 +48,7 @@ pub(crate) fn on_key(app: &mut App, key: Key) {
                     let n = all.len();
                     app.set_phosphor(all[(i + if fwd { 1 } else { n - 1 }) % n]);
                 }
+                4 => app.fx = !app.fx,
                 _ => {}
             }
         }
@@ -95,10 +96,13 @@ pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
         format!("< {theme} >"),
         format!("< {} >", if app.adult { "on" } else { "off" }),
         format!("< {} >", app.phosphor().name()),
+        format!("< {} >", if app.fx { "on" } else { "off" }),
         seed,
         String::new(),
     ];
-    let labels = ["Level", "Theme", "Adult", "Screen", "Seed", "Start"];
+    let labels = [
+        "Level", "Theme", "Adult", "Screen", "Effects", "Seed", "Start",
+    ];
     let mut lines = vec![
         Line::from("Open a new case").style(t.bright()),
         Line::from(""),
@@ -120,6 +124,12 @@ pub(crate) fn render(app: &App, area: Rect, buf: &mut Buffer) {
             .style(t.muted()),
     );
     lines.push(Line::from("Screen: the phosphor the case glows in.").style(t.muted()));
+    lines.push(
+        Line::from(
+            "Effects: static, and in the browser the whole CRT glass. Off is a plain terminal.",
+        )
+        .style(t.muted()),
+    );
     Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .render(inner, buf);

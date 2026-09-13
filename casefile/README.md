@@ -50,8 +50,11 @@ static reseeding (four times a second in the browser, since every repaint runs
 the CRT filter over the whole screen).
 
 The CRT glass (glow, scanlines, grain, vignette, flicker, and the barrel bend)
-is CSS in `crt.css`. `?fx=off` turns it off along with the in-grid static,
-and `prefers-reduced-motion` stops the animated parts.
+is CSS in `crt.css`. The Effects row on setup, `e` on the inbox, or the FX soft
+key turns it off along with the in-grid static, leaving the plain terminal
+look; the browser remembers that choice and the phosphor. `?fx=off` or
+`?fx=on` overrides it for one link, and `prefers-reduced-motion` stops the
+animated parts.
 
 ## Seeds
 
@@ -108,10 +111,11 @@ terminal build from anywhere.
 
 | Key | Action |
 |-----|--------|
-| `↑`/`↓`, `j`/`k`, `Tab` | Move between Level, Theme, Adult, Screen, Seed, Start |
+| `↑`/`↓`, `j`/`k`, `Tab` | Move between Level, Theme, Adult, Screen, Effects, Seed, Start |
 | `←`/`→`, `h`/`l` | Change the selected value |
 | digits, `Backspace` | Edit the seed |
 | `←`/`→` on Screen | Cycle the phosphor: green, amber, white |
+| `←`/`→` on Effects | Static on or off; in the browser, the whole CRT glass |
 | `Enter` | Next row, or start on the Start row |
 | `Esc` | Quit |
 
@@ -124,6 +128,7 @@ terminal build from anywhere.
 | `n` | Notepad |
 | `a` | Accuse |
 | `w` | Wait for mail |
+| `e` | Effects on or off (the FX soft key on touch screens) |
 | `q` | Quit |
 
 ### Thread
