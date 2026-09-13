@@ -34,6 +34,8 @@ web-sys = { version = "0.3", features = [
     "Event",
     "EventTarget",
     "HtmlElement",
+    "HtmlTextAreaElement",
+    "InputEvent",
     "KeyboardEvent",
     "Location",
     "Node",

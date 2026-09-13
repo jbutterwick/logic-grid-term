@@ -25,6 +25,8 @@ a case directly.
 | `--adult` | Profanity, harsher crimes, innuendo. Nothing explicit. |
 | `--phosphor P` | Screen colour: `green` (default), `amber`, or `white`. Does not skip setup. |
 | `--plain` | No static. The screen only redraws on a key press or resize. |
+| `--resume` | Pick up the autosaved case straight away. |
+| `--save PATH` | Where the autosave lives. Default `$XDG_DATA_HOME/casefile/autosave.json`, else `~/.local/share/casefile/autosave.json`. |
 
 ```sh
 casefile --level hard --theme "Haunted Hotel" --seed 42
@@ -43,7 +45,9 @@ instead of sitting side by side, so a phone gets the thread list above the
 mail. Touch screens get a row of labelled soft keys under the screen for the
 current screen's actions, and the key legend along the bottom of the grid goes
 away since the buttons already say what they do; `?keys=on` or `?keys=off`
-forces the bar either way.
+forces the bar either way. When a screen takes typing, the notes on the
+notepad or the seed on setup, the phone's keyboard comes up (a numeric one for
+the seed); a KEYBOARD soft key brings it back if it was dismissed.
 
 The grid only re-renders when something changed: a key, a resize, or the
 static reseeding (four times a second in the browser, since every repaint runs
@@ -55,6 +59,15 @@ key turns it off along with the in-grid static, leaving the plain terminal
 look; the browser remembers that choice and the phosphor. `?fx=off` or
 `?fx=on` overrides it for one link, and `prefers-reduced-motion` stops the
 animated parts.
+
+## Saving
+
+The case is saved after every move: mail, the notepad grid and notes, tick and
+rank. There is one slot. When a save exists the setup screen starts with a
+Resume row naming the case, its seed, level and tick; `Enter` on it picks the
+case up at the inbox. Starting a new case replaces the save on its first move.
+The terminal keeps the save in a file (see `--save` and `--resume`); the browser
+keeps it in local storage, and `?resume` skips the setup screen.
 
 ## Seeds
 

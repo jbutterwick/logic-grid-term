@@ -1,7 +1,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use super::{App, Key, Phosphor, Screen};
+use super::{App, Key, Phosphor, Screen, TextInput};
 use crate::{Entity, Game, Level, Mark, Settings};
 
 const LEVELS: [Level; 3] = [Level::Easy, Level::Medium, Level::Hard];
@@ -241,4 +241,49 @@ fn inbox_e_toggles_effects_and_static_follows() {
     let dots = |s: &str| s.matches(['░', '▒', '·']).count();
     assert!(dots(&noisy) > dots(&plain) + 5, "{noisy}\n{plain}");
     assert!(!plain.contains('▒') && !plain.contains('·'));
+}
+
+#[test]
+fn snapshot_restores_mail_notes_and_grid_and_resume_row_comes_first() {
+    let mut app = App::with_game(game(Level::Medium));
+    keys(
+        &mut app,
+        &[Key::Down, Key::Enter, Key::Char('c'), Key::Enter],
+    );
+    keys(&mut app, &[Key::Esc, Key::Char('w'), Key::Char('n')]);
+    keys(
+        &mut app,
+        &[
+            Key::Right,
+            Key::Char('x'),
+            Key::Tab,
+            Key::Char('h'),
+            Key::Char('i'),
+        ],
+    );
+    assert_eq!(app.wants_text_input(), Some(TextInput::Text));
+    let json = app.snapshot().expect("a game to save");
+
+    let mut fresh = App::new(1);
+    assert!(fresh.snapshot().is_none());
+    assert!(fresh.set_saved("not json").is_err());
+    fresh.set_saved(&json).unwrap();
+    assert!(fresh.has_saved());
+    let out = text(&draw(&fresh, 100, 30));
+    assert!(out.contains("Resume") && out.contains("tick 2"), "{out}");
+    // The Resume row is first: Enter on it picks the game up at the inbox.
+    fresh.on_key(Key::Enter);
+    assert_eq!(fresh.screen, Screen::Inbox);
+    assert!(!fresh.has_saved());
+    assert_eq!(fresh.game().to_json(), json);
+    assert_eq!(fresh.game().notes, "hi");
+    assert_eq!(fresh.game().threads[0].len(), 2);
+
+    // With the save gone the first row is Level again and Start is last.
+    let mut plain = App::new(1);
+    assert_eq!(plain.wants_text_input(), None);
+    keys(&mut plain, &[Key::Down; 5]);
+    assert_eq!(plain.wants_text_input(), Some(TextInput::Digits));
+    keys(&mut plain, &[Key::Down, Key::Enter]);
+    assert_eq!(plain.screen, Screen::Inbox);
 }

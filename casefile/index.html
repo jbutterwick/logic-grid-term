@@ -27,6 +27,8 @@
     <div class="grain"></div>
     <div class="glass"></div>
     <div class="flicker"></div>
+    <!-- Focused when a screen takes text, so a phone brings up its keyboard; never shown. -->
+    <textarea id="kbd" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" tabindex="-1" aria-hidden="true"></textarea>
     <nav id="keys" aria-label="Keys"></nav>
     <script>
       // The grid measures its cell from the font in use; re-measure once the webfont lands.

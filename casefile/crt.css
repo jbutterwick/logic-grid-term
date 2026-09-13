@@ -143,6 +143,23 @@ body {
   99% { opacity: 0.05; }
 }
 
+/* The keyboard hook: a real textarea the Rust side focuses when the notes or the seed
+   take typing. Practically invisible, but not display:none (that would keep the
+   keyboard away), and 16px so iOS does not zoom into it. */
+#kbd {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0.01;
+  font-size: 16px;
+  resize: none;
+  pointer-events: none;
+}
+
 /* Soft keys: hidden until there is a touch screen and no pointer. Filled by src/web.rs. */
 #keys {
   display: none;

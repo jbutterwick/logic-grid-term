@@ -40,12 +40,23 @@ pub(crate) enum Screen {
     Accuse,
 }
 
+/// What kind of on-screen keyboard a screen wants, for hosts that have to summon one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TextInput {
+    /// Free text: the notepad's notes.
+    Text,
+    /// Digits only: the seed on setup.
+    Digits,
+}
+
 /// The whole frontend: one game (after setup) plus per-screen cursors.
 pub struct App {
     pub(crate) screen: Screen,
     pub(crate) help: bool,
     pub(crate) quit: bool,
     pub(crate) game: Option<Game>,
+    /// A saved game the host found, offered as a Resume row on setup until taken.
+    pub(crate) saved: Option<Game>,
     /// Palette every screen paints from.
     pub(crate) look: Theme,
     /// Frames drawn so far; seeds the static.
@@ -85,6 +96,7 @@ impl App {
             help: false,
             quit: false,
             game: None,
+            saved: None,
             look: Theme::default(),
             frame: 0,
             static_every: 6,
@@ -210,6 +222,7 @@ impl App {
                 ("BACK", Esc),
             ],
             Screen::Compose => vec![("▲", Up), ("▼", Down), ("SEND", Enter), ("BACK", Esc)],
+            Screen::Notepad if self.pad_notes => vec![("GRID", Tab), ("BACK", Esc)],
             Screen::Notepad => vec![
                 ("▲", Up),
                 ("▼", Down),
@@ -227,6 +240,50 @@ impl App {
                 ("NO", Char('n')),
                 ("BACK", Esc),
             ],
+        }
+    }
+
+    /// Offer a saved game (its JSON, as [`App::snapshot`] gave it) on the setup screen.
+    /// Malformed JSON is ignored and reported.
+    pub fn set_saved(&mut self, json: &str) -> Result<(), String> {
+        let game = Game::from_json(json).map_err(|e| e.to_string())?;
+        self.saved = Some(game);
+        Ok(())
+    }
+
+    /// Whether a saved game is on offer.
+    pub fn has_saved(&self) -> bool {
+        self.saved.is_some()
+    }
+
+    /// Pick up the saved game where it left off, at the inbox.
+    pub fn resume(&mut self) -> bool {
+        let Some(game) = self.saved.take() else {
+            return false;
+        };
+        self.game = Some(game);
+        self.screen = Screen::Inbox;
+        self.help = false;
+        self.inbox_sel = 0;
+        self.scroll = 0;
+        true
+    }
+
+    /// The whole game as JSON, for a host to keep between runs; `None` before a case opens.
+    /// Everything that matters is in it: mail, the notepad grid and notes, tick and rank.
+    pub fn snapshot(&self) -> Option<String> {
+        self.game.as_ref().map(Game::to_json)
+    }
+
+    /// The keyboard the active screen wants, if a host has to bring one up.
+    pub fn wants_text_input(&self) -> Option<TextInput> {
+        if self.help {
+            return None;
+        }
+        match self.screen {
+            Screen::Notepad if self.pad_notes => Some(TextInput::Text),
+            Screen::Setup if screens::setup::on_seed_row(self) => Some(TextInput::Digits),
+            _ => None,
         }
     }
 

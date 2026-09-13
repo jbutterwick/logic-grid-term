@@ -31,6 +31,26 @@ fn main() {
         /// No static: a still screen that only redraws on a key.
         #[arg(long)]
         plain: bool,
+        /// Pick up the autosaved case straight away.
+        #[arg(long)]
+        resume: bool,
+        /// Where the autosave lives. Default: $XDG_DATA_HOME/casefile/autosave.json, or
+        /// ~/.local/share/casefile/autosave.json.
+        #[arg(long)]
+        save: Option<std::path::PathBuf>,
+    }
+
+    /// The autosave path, from the flag or the data directory.
+    fn save_path(flag: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+        if let Some(p) = flag {
+            return Some(p);
+        }
+        let base = std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/share"))
+            })?;
+        Some(base.join("casefile").join("autosave.json"))
     }
 
     let cli = Cli::parse();
@@ -67,6 +87,22 @@ fn main() {
         app.set_phosphor(p);
     }
     app.set_fx(!cli.plain);
+
+    // Autosave: offered on setup as Resume, or taken straight away with --resume.
+    let save_path = save_path(cli.save);
+    let mut last_saved = save_path
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    if let Some(json) = &last_saved
+        && let Err(e) = app.set_saved(json)
+    {
+        eprintln!("ignoring unreadable autosave: {e}");
+        last_saved = None;
+    }
+    if cli.resume && !app.resume() {
+        eprintln!("nothing to resume");
+        std::process::exit(2)
+    }
     // Static shimmers at 10 Hz; a plain screen only needs to notice resizes.
     let tick = Duration::from_millis(if cli.plain { 1000 } else { 100 });
 
@@ -102,6 +138,19 @@ fn main() {
             _ => continue,
         };
         app.on_key(key);
+        if let (Some(path), Some(json)) = (&save_path, app.snapshot())
+            && last_saved.as_deref() != Some(json.as_str())
+        {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if let Err(e) = std::fs::write(path, &json) {
+                ratatui::restore();
+                eprintln!("could not save to {}: {e}", path.display());
+                std::process::exit(1)
+            }
+            last_saved = Some(json);
+        }
     }
     ratatui::restore();
 }

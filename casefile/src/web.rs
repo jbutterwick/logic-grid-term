@@ -13,9 +13,9 @@ use ratatui::layout::{Position, Size};
 use ratatui::style::{Color, Modifier};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
-use web_sys::{Document, Element, Event, KeyboardEvent};
+use web_sys::{Document, Element, Event, HtmlTextAreaElement, InputEvent, KeyboardEvent};
 
-use crate::ui::{App, Key, Phosphor};
+use crate::ui::{App, Key, Phosphor, TextInput};
 use crate::{Game, Level, Settings};
 
 /// The requestAnimationFrame callback, shared with itself so it can ask for the next frame.
@@ -273,7 +273,37 @@ fn hex(c: Color) -> String {
     }
 }
 
-/// Run the game in the page: `#screen` holds the grid, `#keys` the soft-key bar.
+/// Zero-width space kept in the keyboard textarea so a backspace has something to delete
+/// and therefore fires an input event.
+const SENTINEL: &str = "\u{200b}";
+
+/// Focus or release the keyboard textarea to match what the screen wants. Called from
+/// input handlers, which count as user gestures, the only place a phone will open its
+/// keyboard from.
+fn sync_keyboard(app: &App, kbd: &HtmlTextAreaElement, document: &Document) {
+    let active = document.active_element().is_some_and(|el| el.id() == "kbd");
+    match app.wants_text_input() {
+        Some(kind) => {
+            let mode = match kind {
+                TextInput::Text => "text",
+                TextInput::Digits => "numeric",
+            };
+            let _ = kbd.set_attribute("inputmode", mode);
+            if !active {
+                kbd.set_value(SENTINEL);
+                let _ = kbd.focus();
+            }
+        }
+        None if active => {
+            let _ = kbd.blur();
+        }
+        None => {}
+    }
+}
+
+/// Run the game in the page: `#screen` holds the grid, `#keys` the soft-key bar, `#kbd`
+/// a hidden textarea that brings up a phone's keyboard when the notes or the seed take
+/// typing.
 ///
 /// Query parameters mirror the command line. `seed`, `level`, `theme` and `adult` skip the
 /// setup screen and open that case (a shareable link); `phosphor=green|amber|white` picks
@@ -284,6 +314,10 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
     let document = window.document().ok_or("no document")?;
     let screen = document.get_element_by_id("screen").ok_or("no #screen")?;
     let keys = document.get_element_by_id("keys").ok_or("no #keys")?;
+    let kbd: HtmlTextAreaElement = document
+        .get_element_by_id("kbd")
+        .ok_or("no #kbd")?
+        .dyn_into()?;
 
     // Remembered look, then the link's own parameters on top.
     let storage = window.local_storage().ok().flatten();
@@ -297,6 +331,13 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
     }
     if stored("casefile.fx").as_deref() == Some("off") {
         app.set_fx(false);
+    }
+    // The autosave: offered as Resume on setup, or taken straight away with ?resume.
+    let mut last_saved = stored("casefile.save");
+    if let Some(json) = &last_saved
+        && app.set_saved(json).is_err()
+    {
+        last_saved = None;
     }
     let mut classes: Vec<&str> = Vec::new();
     if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&window.location().search()?) {
@@ -330,6 +371,9 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
             Some("on") => app.set_fx(true),
             _ => {}
         }
+        if params.get("resume").is_some() {
+            app.resume();
+        }
         match params.get("keys").as_deref() {
             Some("on") => classes.push("keys"),
             Some("off") => classes.push("nokeys"),
@@ -351,6 +395,8 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
     let keydown = Closure::wrap(Box::new({
         let app = app.clone();
         let input = input.clone();
+        let kbd = kbd.clone();
+        let document = document.clone();
         move |e: KeyboardEvent| {
             if e.ctrl_key() || e.meta_key() || e.alt_key() {
                 return;
@@ -359,7 +405,9 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
                 return;
             };
             e.prevent_default();
-            app.borrow_mut().on_key(key);
+            let mut app = app.borrow_mut();
+            app.on_key(key);
+            sync_keyboard(&app, &kbd, &document);
             input.set(true);
         }
     }) as Box<dyn FnMut(KeyboardEvent)>);
@@ -370,25 +418,76 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
     let click = Closure::wrap(Box::new({
         let app = app.clone();
         let input = input.clone();
+        let kbd = kbd.clone();
+        let document = document.clone();
         move |e: Event| {
-            let key = e
+            let name = e
                 .target()
                 .and_then(|t| t.dyn_into::<Element>().ok())
                 .and_then(|el| el.closest("[data-key]").ok().flatten())
-                .and_then(|el| el.get_attribute("data-key"))
-                .and_then(|name| key_from_name(&name));
-            if let Some(key) = key {
-                app.borrow_mut().on_key(key);
+                .and_then(|el| el.get_attribute("data-key"));
+            let Some(name) = name else {
+                return;
+            };
+            let mut app = app.borrow_mut();
+            // "kbd" is the host's own button: bring the keyboard back after it was dismissed.
+            if name != "kbd"
+                && let Some(key) = key_from_name(&name)
+            {
+                app.on_key(key);
                 input.set(true);
             }
+            sync_keyboard(&app, &kbd, &document);
         }
     }) as Box<dyn FnMut(Event)>);
     keys.add_event_listener_with_callback("click", click.as_ref().unchecked_ref())?;
     click.forget();
 
+    // Typing into the hidden textarea, including phone keyboards that compose words:
+    // whatever changed since the last event becomes backspaces and characters.
+    let typed = Closure::wrap(Box::new({
+        let app = app.clone();
+        let input = input.clone();
+        let kbd = kbd.clone();
+        let mut tracked = SENTINEL.to_string();
+        move |e: Event| {
+            let now = kbd.value();
+            let common = tracked
+                .chars()
+                .zip(now.chars())
+                .take_while(|(a, b)| a == b)
+                .count();
+            let removed = tracked.chars().count() - common;
+            let added: String = now.chars().skip(common).collect();
+            let mut app = app.borrow_mut();
+            for _ in 0..removed {
+                app.on_key(Key::Backspace);
+            }
+            for c in added.chars() {
+                app.on_key(if c == '\n' || c == '\r' {
+                    Key::Enter
+                } else {
+                    Key::Char(c)
+                });
+            }
+            input.set(true);
+            let composing = e
+                .dyn_ref::<InputEvent>()
+                .is_some_and(InputEvent::is_composing);
+            if composing {
+                tracked = now;
+            } else {
+                kbd.set_value(SENTINEL);
+                tracked = SENTINEL.to_string();
+            }
+        }
+    }) as Box<dyn FnMut(Event)>);
+    kbd.add_event_listener_with_callback("input", typed.as_ref().unchecked_ref())?;
+    typed.forget();
+
     // Draw loop: 60 Hz, but the grid is only re-rendered after input, a static reseed, a
     // palette change, or a resize; an idle frame costs a few comparisons.
-    let mut last_keys: Vec<&'static str> = Vec::new();
+    let mut last_keys: (Vec<&'static str>, bool) = (Vec::new(), false);
     let mut last_phosphor: Option<Phosphor> = None;
     let mut last_fx: Option<bool> = None;
     let mut last_seed: Option<u64> = None;
@@ -435,10 +534,11 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
                 terminal.backend_mut().set_bg(t.bg);
             }
             let soft = app.soft_keys();
+            let typing = app.wants_text_input().is_some();
             let labels: Vec<&'static str> = soft.iter().map(|(l, _)| *l).collect();
-            if labels != last_keys {
-                last_keys = labels;
-                let html: String = soft
+            if (labels.as_slice(), typing) != (last_keys.0.as_slice(), last_keys.1) {
+                last_keys = (labels, typing);
+                let mut html: String = soft
                     .iter()
                     .map(|(label, key)| {
                         let class = if label.chars().count() == 1 {
@@ -452,8 +552,21 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
                         )
                     })
                     .collect();
+                if typing {
+                    html.push_str("<button type=\"button\" data-key=\"kbd\">KEYBOARD</button>");
+                }
                 keys.set_inner_html(&html);
                 bar_h = -1.0;
+            }
+            // Autosave after anything changed the game.
+            if redraw
+                && let Some(json) = app.snapshot()
+                && last_saved.as_deref() != Some(json.as_str())
+            {
+                if let Some(s) = &storage {
+                    let _ = s.set_item("casefile.save", &json);
+                }
+                last_saved = Some(json);
             }
         }
         let probe = app.borrow().frame().is_multiple_of(30);
