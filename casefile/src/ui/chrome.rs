@@ -175,7 +175,11 @@ fn body_after(area: Rect, rows: u16) -> Rect {
 }
 
 /// The key legend on the bottom row, a blank row above it; returns the area above both.
+/// With the legend off (soft keys on screen) the whole area comes back untouched.
 pub(crate) fn footer(app: &App, keys: &[(&str, &str)], area: Rect, buf: &mut Buffer) -> Rect {
+    if !app.legend {
+        return area;
+    }
     if area.height < 2 {
         return Rect::new(area.x, area.y, area.width, 0);
     }
@@ -252,7 +256,7 @@ pub(crate) fn noise(app: &App, area: Rect, buf: &mut Buffer) {
     while top > area.top() && blank(buf, top - 1) {
         top -= 1;
     }
-    let seed = app.frame / 6;
+    let seed = app.static_seed();
     let style = app.look.noise();
     for y in top..area.bottom() {
         for x in area.left()..area.right() {

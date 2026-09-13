@@ -26,6 +26,8 @@ pub struct DomGrid {
     document: Document,
     screen: Element,
     cells: Vec<Element>,
+    /// What each span last showed, so unchanged text and style cost no DOM write.
+    shown: Vec<(String, String)>,
     size: Size,
     cell_px: (f64, f64),
     bg: Color,
@@ -47,6 +49,7 @@ impl DomGrid {
             document,
             screen,
             cells: Vec::new(),
+            shown: Vec::new(),
             size: Size::new(0, 0),
             cell_px: (10.0, 20.0),
             bg: Color::Reset,
@@ -66,9 +69,10 @@ impl DomGrid {
     /// nothing happened: only a resize, or every `probe`th call, pays for the measurement.
     /// The probe catches what no event announces, like the webfont landing after first paint
     /// or a stylesheet changing the font.
-    pub fn refresh(&mut self, probe: bool) {
+    /// Returns true when the grid was rebuilt and needs a full draw.
+    pub fn refresh(&mut self, probe: bool) -> bool {
         if !self.dirty.replace(false) && !probe {
-            return;
+            return false;
         }
         if let Some(px) = self.measure() {
             self.cell_px = px;
@@ -81,7 +85,9 @@ impl DomGrid {
         if size != self.size || self.cells.is_empty() {
             self.size = size;
             self.rebuild();
+            return true;
         }
+        false
     }
 
     fn measure(&self) -> Option<(f64, f64)> {
@@ -100,6 +106,7 @@ impl DomGrid {
     fn rebuild(&mut self) {
         self.screen.set_inner_html("");
         self.cells.clear();
+        self.shown.clear();
         for _ in 0..self.size.height {
             let Ok(row) = self.document.create_element("div") else {
                 return;
@@ -112,26 +119,28 @@ impl DomGrid {
                 span.set_text_content(Some(" "));
                 let _ = row.append_child(&span);
                 self.cells.push(span);
+                self.shown.push((" ".into(), String::new()));
             }
             let _ = self.screen.append_child(&row);
         }
     }
+}
 
-    fn css(&self, cell: &Cell) -> String {
-        let mut css = String::new();
-        if let Color::Rgb(r, g, b) = cell.fg {
-            css.push_str(&format!("color:rgb({r},{g},{b});"));
-        }
-        if let Color::Rgb(r, g, b) = cell.bg
-            && cell.bg != self.bg
-        {
-            css.push_str(&format!("background:rgb({r},{g},{b});"));
-        }
-        if cell.modifier.contains(Modifier::BOLD) {
-            css.push_str("font-weight:bold;");
-        }
-        css
+/// Inline style for a cell; empty for plain text in the shared background.
+fn css(cell: &Cell, shared_bg: Color) -> String {
+    let mut css = String::new();
+    if let Color::Rgb(r, g, b) = cell.fg {
+        css.push_str(&format!("color:rgb({r},{g},{b});"));
     }
+    if let Color::Rgb(r, g, b) = cell.bg
+        && cell.bg != shared_bg
+    {
+        css.push_str(&format!("background:rgb({r},{g},{b});"));
+    }
+    if cell.modifier.contains(Modifier::BOLD) {
+        css.push_str("font-weight:bold;");
+    }
+    css
 }
 
 impl Backend for DomGrid {
@@ -143,11 +152,29 @@ impl Backend for DomGrid {
     {
         let w = usize::from(self.size.width);
         for (x, y, cell) in content {
-            let Some(el) = self.cells.get(usize::from(y) * w + usize::from(x)) else {
+            let i = usize::from(y) * w + usize::from(x);
+            let (Some(el), Some(shown)) = (self.cells.get(i), self.shown.get_mut(i)) else {
                 continue;
             };
-            el.set_text_content(Some(cell.symbol()));
-            let _ = el.set_attribute("style", &self.css(cell));
+            if shown.0 != cell.symbol() {
+                el.set_text_content(Some(cell.symbol()));
+                shown.0 = cell.symbol().to_string();
+            }
+            let css = css(cell, self.bg);
+            if shown.1 != css {
+                if css.is_empty() {
+                    let _ = el.remove_attribute("style");
+                } else {
+                    let _ = el.set_attribute("style", &css);
+                }
+                // Selection blocks glow as one piece; the class is cheaper than a style query.
+                let _ = if css.contains("background") {
+                    el.set_attribute("class", "inv")
+                } else {
+                    el.remove_attribute("class")
+                };
+                shown.1 = css;
+            }
         }
         Ok(())
     }
@@ -169,9 +196,11 @@ impl Backend for DomGrid {
     }
 
     fn clear(&mut self) -> io::Result<()> {
-        for el in &self.cells {
+        for (el, shown) in self.cells.iter().zip(&mut self.shown) {
             el.set_text_content(Some(" "));
             let _ = el.remove_attribute("style");
+            let _ = el.remove_attribute("class");
+            *shown = (" ".into(), String::new());
         }
         Ok(())
     }
@@ -289,13 +318,18 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
         }
     }
 
+    // A browser repaint runs the CRT filter over the whole tube, so hold the static longer
+    // than the terminal does: four reseeds a second at 60 Hz.
+    app.set_static_every(15);
     let app = Rc::new(RefCell::new(app));
+    let input = Rc::new(Flag::new(true));
     let mut terminal = Terminal::new(DomGrid::new(document.clone(), screen)?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // Physical keyboard: anything the browser itself does not own.
     let keydown = Closure::wrap(Box::new({
         let app = app.clone();
+        let input = input.clone();
         move |e: KeyboardEvent| {
             if e.ctrl_key() || e.meta_key() || e.alt_key() {
                 return;
@@ -305,6 +339,7 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
             };
             e.prevent_default();
             app.borrow_mut().on_key(key);
+            input.set(true);
         }
     }) as Box<dyn FnMut(KeyboardEvent)>);
     document.add_event_listener_with_callback("keydown", keydown.as_ref().unchecked_ref())?;
@@ -313,6 +348,7 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
     // Soft keys: one listener on the bar, buttons carry `data-key`.
     let click = Closure::wrap(Box::new({
         let app = app.clone();
+        let input = input.clone();
         move |e: Event| {
             let key = e
                 .target()
@@ -322,25 +358,34 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
                 .and_then(|name| key_from_name(&name));
             if let Some(key) = key {
                 app.borrow_mut().on_key(key);
+                input.set(true);
             }
         }
     }) as Box<dyn FnMut(Event)>);
     keys.add_event_listener_with_callback("click", click.as_ref().unchecked_ref())?;
     click.forget();
 
-    // Draw loop: 60 Hz, redrawing only what changed.
+    // Draw loop: 60 Hz, but the grid is only re-rendered after input, a static reseed, a
+    // palette change, or a resize; an idle frame costs a few comparisons.
     let mut last_keys: Vec<&'static str> = Vec::new();
     let mut last_phosphor: Option<Phosphor> = None;
+    let mut last_seed: Option<u64> = None;
     let root = document.document_element().ok_or("no root")?;
     let root: web_sys::HtmlElement = root.dyn_into()?;
     let frame: FrameLoop = Rc::new(RefCell::new(None));
     let next = frame.clone();
     *frame.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+        let mut redraw = input.replace(false);
         {
             let mut app = app.borrow_mut();
             app.advance(1);
+            if last_seed != Some(app.static_seed()) {
+                last_seed = Some(app.static_seed());
+                redraw = true;
+            }
             if last_phosphor != Some(app.phosphor()) {
                 last_phosphor = Some(app.phosphor());
+                redraw = true;
                 let t = app.theme();
                 let style = root.style();
                 for (name, color) in [
@@ -375,9 +420,25 @@ pub fn run(mut app: App) -> Result<(), JsValue> {
             }
         }
         let probe = app.borrow().frame().is_multiple_of(30);
-        terminal.backend_mut().refresh(probe);
-        let app = app.borrow();
-        let _ = terminal.draw(|f| app.render(f.area(), f.buffer_mut()));
+        if terminal.backend_mut().refresh(probe) {
+            redraw = true;
+        }
+        if probe {
+            // Soft keys on screen (a touch layout, or ?keys=on) make the legend redundant.
+            let soft_visible = web_sys::window()
+                .and_then(|w| w.get_computed_style(&keys).ok().flatten())
+                .and_then(|s| s.get_property_value("display").ok())
+                .is_some_and(|d| d != "none");
+            let mut app = app.borrow_mut();
+            if app.legend() == soft_visible {
+                app.set_legend(!soft_visible);
+                redraw = true;
+            }
+        }
+        if redraw {
+            let app = app.borrow();
+            let _ = terminal.draw(|f| app.render(f.area(), f.buffer_mut()));
+        }
         if let Some(cb) = next.borrow().as_ref() {
             let _ =
                 web_sys::window().map(|w| w.request_animation_frame(cb.as_ref().unchecked_ref()));

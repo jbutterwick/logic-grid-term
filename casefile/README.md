@@ -40,8 +40,14 @@ starts at the setup screen.
 The grid fills the window and recomputes its columns whenever the window
 changes size or the font loads. Under about seventy columns the panes stack
 instead of sitting side by side, so a phone gets the thread list above the
-mail. Touch screens get a row of soft keys under the screen for the current
-screen's actions; `?keys=on` or `?keys=off` forces the bar either way.
+mail. Touch screens get a row of labelled soft keys under the screen for the
+current screen's actions, and the key legend along the bottom of the grid goes
+away since the buttons already say what they do; `?keys=on` or `?keys=off`
+forces the bar either way.
+
+The grid only re-renders when something changed: a key, a resize, or the
+static reseeding (four times a second in the browser, since every repaint runs
+the CRT filter over the whole screen).
 
 The CRT glass (glow, scanlines, grain, vignette, flicker, and the barrel bend)
 is CSS in `crt.css`. `?fx=off` turns it off along with the in-grid static,

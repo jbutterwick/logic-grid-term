@@ -50,8 +50,12 @@ pub struct App {
     pub(crate) look: Theme,
     /// Frames drawn so far; seeds the static.
     pub(crate) frame: u64,
+    /// The static reseeds every this many frames.
+    pub(crate) static_every: u64,
     /// Static on or off.
     pub(crate) fx: bool,
+    /// Whether the key legend is drawn along the bottom; off when a host shows soft keys.
+    pub(crate) legend: bool,
     // setup
     pub(crate) seed: u64,
     pub(crate) setup_row: usize,
@@ -83,7 +87,9 @@ impl App {
             game: None,
             look: Theme::default(),
             frame: 0,
+            static_every: 6,
             fx: true,
+            legend: true,
             seed,
             setup_row: 0,
             level: Level::Easy,
@@ -125,15 +131,41 @@ impl App {
         &self.look
     }
 
+    /// Show or hide the key legend along the bottom. A host with labelled on-screen keys
+    /// turns it off and gets the rows back.
+    pub fn set_legend(&mut self, on: bool) {
+        self.legend = on;
+    }
+
+    /// Whether the key legend is drawn.
+    pub fn legend(&self) -> bool {
+        self.legend
+    }
+
     /// Turn the static on or off.
     pub fn set_fx(&mut self, on: bool) {
         self.fx = on;
     }
 
-    /// Count `frames` drawn; the static reseeds every sixth frame, so a host that redraws
-    /// ten times a second should pass 6 and one that redraws at 60 Hz should pass 1.
+    /// Count `frames` drawn. The static reseeds every [`App::set_static_every`] frames
+    /// (six by default), so a host that redraws ten times a second passes 6.
     pub fn advance(&mut self, frames: u64) {
         self.frame = self.frame.wrapping_add(frames);
+    }
+
+    /// How many frames the static holds still for. A host whose repaints are expensive
+    /// (a browser with a CRT filter over the grid) wants this high.
+    pub fn set_static_every(&mut self, frames: u64) {
+        self.static_every = frames.max(1);
+    }
+
+    /// The static's current seed; a host only needs to redraw when this or the input changes.
+    pub fn static_seed(&self) -> u64 {
+        if self.fx {
+            self.frame / self.static_every
+        } else {
+            0
+        }
     }
 
     /// Frames drawn so far.
